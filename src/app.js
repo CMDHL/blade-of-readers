@@ -19,6 +19,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_SRC;
 
 const punctuationPattern = /[\s.,;:!?()[\]{}"'`~@#$%^&*_+=<>/\\|，。？！、；：（）【】《》“”‘’—…·「」『』]+/u;
 const textSegmentPattern = /[\s.,;:!?()[\]{}"'`~@#$%^&*_+=<>/\\|，。？！、；：（）【】《》“”‘’—…·「」『』]+|[^\s.,;:!?()[\]{}"'`~@#$%^&*_+=<>/\\|，。？！、；：（）【】《》“”‘’—…·「」『』]+/gu;
+const textMeasureContext = document.createElement("canvas").getContext("2d");
 
 const keyMap = {
   left: ["ArrowLeft", "KeyA"],
@@ -115,7 +116,7 @@ const controllerDirections = {
 let remappingAction = null;
 let remappingDevice = null;
 let controllerRemapBaseline = new Set();
-let collisionsVisible = true;
+let collisionsVisible = false;
 let autoScrollEnabled = true;
 let programmaticScrollUntil = 0;
 let currentLanguage = "en";
@@ -417,66 +418,138 @@ function resetPlayer() {
   renderPlayer();
 }
 
-function textAdvanceWidth(text, fontHeight) {
-  let width = 0;
-  for (const char of text) {
-    if (/\s/u.test(char)) {
-      width += fontHeight * 0.32;
-    } else if (/[\u2E80-\u9FFF\uAC00-\uD7AF\u3040-\u30FF]/u.test(char)) {
-      width += fontHeight;
-    } else if (punctuationPattern.test(char)) {
-      width += fontHeight * 0.34;
-    } else if (/[ilI1]/u.test(char)) {
-      width += fontHeight * 0.28;
-    } else if (/[mwMW]/u.test(char)) {
-      width += fontHeight * 0.82;
-    } else {
-      width += fontHeight * 0.52;
-    }
+function cssFontFamily(fontFamily) {
+  if (!fontFamily) return "sans-serif";
+  if (
+    fontFamily.includes(",")
+    || /^["'].*["']$/u.test(fontFamily)
+    || /^(serif|sans-serif|monospace|cursive|fantasy|system-ui)$/u.test(fontFamily)
+  ) {
+    return fontFamily;
   }
-  return width;
+  return `"${fontFamily.replace(/\\/gu, "\\\\").replace(/"/gu, '\\"')}"`;
 }
 
-function splitTextIntoPlatforms(item, viewport, pageOffsetY, pageNumber) {
+function textMeasureFont(fontHeight, style) {
+  const fontStyle = style?.italic ? "italic " : "";
+  const fontWeight = style?.black ? "900 " : style?.bold ? "700 " : "";
+  return `${fontStyle}${fontWeight}${fontHeight}px ${cssFontFamily(style?.fontFamily)}`;
+}
+
+function measureTextWidth(text, fontHeight, style) {
+  if (!textMeasureContext || !text) return 0;
+  textMeasureContext.font = textMeasureFont(fontHeight, style);
+  textMeasureContext.fontKerning = "normal";
+  return textMeasureContext.measureText(text).width;
+}
+
+function estimatedTextWidth(text, fontHeight) {
+  return Array.from(text).length * fontHeight * 0.5;
+}
+
+function fallbackTextWidth(text, fontHeight) {
+  return Math.max(config.platformMinWidth, estimatedTextWidth(text, fontHeight));
+}
+
+function textSegments(text) {
+  return Array.from(text.matchAll(textSegmentPattern), (match) => ({
+    text: match[0],
+    start: match.index,
+    end: match.index + match[0].length,
+    isSeparator: punctuationPattern.test(match[0]),
+  }));
+}
+
+function measureTextSegmentRects(text, segments, fontHeight, style, totalTextWidth, measuredTextWidth) {
+  if (!document.createRange || measuredTextWidth <= 0) return null;
+
+  const widthScale = totalTextWidth / measuredTextWidth;
+  const probe = document.createElement("span");
+  probe.textContent = text;
+  probe.setAttribute("aria-hidden", "true");
+  probe.style.position = "absolute";
+  probe.style.left = "-10000px";
+  probe.style.top = "-10000px";
+  probe.style.visibility = "hidden";
+  probe.style.whiteSpace = "pre";
+  probe.style.font = textMeasureFont(fontHeight, style);
+  probe.style.fontKerning = "normal";
+  probe.style.transform = `scaleX(${widthScale})`;
+  probe.style.transformOrigin = "0 0";
+  document.body.append(probe);
+
+  const textNode = probe.firstChild;
+  if (!textNode) {
+    probe.remove();
+    return null;
+  }
+
+  const range = document.createRange();
+  const origin = probe.getBoundingClientRect();
+  const rects = new Map();
+
+  try {
+    for (const segment of segments) {
+      if (segment.isSeparator) continue;
+      range.setStart(textNode, segment.start);
+      range.setEnd(textNode, segment.end);
+      const rect = range.getBoundingClientRect();
+      if (rect.width > 0) {
+        rects.set(segment, {
+          x: rect.left - origin.left,
+          width: rect.width,
+        });
+      }
+    }
+  } finally {
+    range.detach?.();
+    probe.remove();
+  }
+
+  return rects;
+}
+
+function splitTextIntoPlatforms(item, style, viewport, pageOffsetY, pageNumber) {
   const text = item.str || "";
-  const segments = text.match(textSegmentPattern) || [];
-  const textSegments = segments.filter((segment) => !punctuationPattern.test(segment));
-  if (!textSegments.length) return [];
+  const segments = textSegments(text);
+  if (!segments.some((segment) => !segment.isSeparator)) return [];
 
   const transform = pdfjsLib.Util.transform(viewport.transform, item.transform);
   const x = transform[4];
   const y = transform[5] + pageOffsetY;
   const fontHeight = Math.max(1, Math.hypot(transform[2], transform[3]) || item.height || 10);
-  const measuredWidth = textAdvanceWidth(text, fontHeight);
-  const pdfTextWidth = (item.width || 0) * viewport.scale;
-  const totalTextWidth = Math.max(pdfTextWidth, measuredWidth, text.length * fontHeight * 0.48);
-  const segmentWidths = segments.map((segment) => textAdvanceWidth(segment, fontHeight));
-  const separatorWidth = segments.reduce(
-    (sum, segment, index) => sum + (punctuationPattern.test(segment) ? segmentWidths[index] : 0),
-    0,
-  );
-  const extraGapWidth = Math.max(0, totalTextWidth - measuredWidth);
-  const shrinkRatio = totalTextWidth < measuredWidth ? totalTextWidth / Math.max(measuredWidth, 1) : 1;
-  let cursor = x;
-
-  return segments.flatMap((segment, index) => {
-    let width = segmentWidths[index] * shrinkRatio;
-    if (punctuationPattern.test(segment)) {
-      width += separatorWidth > 0 ? extraGapWidth * (segmentWidths[index] / separatorWidth) : 0;
-      cursor += width;
-      return [];
+  const measuredTextWidth = measureTextWidth(text, fontHeight, style);
+  const pdfTextWidth = Math.abs(item.width || 0) * viewport.scale;
+  const totalTextWidth = pdfTextWidth || measuredTextWidth || fallbackTextWidth(text, fontHeight);
+  const widthScale = measuredTextWidth > 0 ? totalTextWidth / measuredTextWidth : 1;
+  const fallbackScale = measuredTextWidth > 0 ? 1 : totalTextWidth / Math.max(estimatedTextWidth(text, fontHeight), 1);
+  const segmentRects = measureTextSegmentRects(text, segments, fontHeight, style, totalTextWidth, measuredTextWidth);
+  const prefixWidths = new Map([[0, 0]]);
+  const prefixWidth = (index) => {
+    if (!prefixWidths.has(index)) {
+      const prefix = text.slice(0, index);
+      const width = measuredTextWidth > 0
+        ? measureTextWidth(prefix, fontHeight, style) * widthScale
+        : estimatedTextWidth(prefix, fontHeight) * fallbackScale;
+      prefixWidths.set(index, width);
     }
+    return prefixWidths.get(index);
+  };
 
+  return segments.flatMap((segment) => {
+    if (segment.isSeparator) return [];
+    const measuredSegment = segmentRects?.get(segment);
+    const segmentX = x + (measuredSegment?.x ?? prefixWidth(segment.start));
+    const segmentWidth = measuredSegment?.width ?? (prefixWidth(segment.end) - prefixWidth(segment.start));
     const platform = {
-      x: cursor,
+      x: segmentX,
       y: y - fontHeight * 0.78,
-      width: Math.max(config.platformMinWidth, width),
+      width: Math.max(config.platformMinWidth, segmentWidth),
       height: Math.max(2, fontHeight * 0.2),
       textHeight: fontHeight,
       page: pageNumber,
       type: "text",
     };
-    cursor += width;
     return [platform];
   });
 }
@@ -629,7 +702,9 @@ async function loadPdf(file) {
     pdfDocument.insertBefore(pageCanvas, playerSprite);
 
     const textContent = await page.getTextContent();
-    const pagePlatforms = textContent.items.flatMap((item) => splitTextIntoPlatforms(item, viewport, offsetY, pageNumber));
+    const pagePlatforms = textContent.items.flatMap((item) => (
+      splitTextIntoPlatforms(item, textContent.styles[item.fontName], viewport, offsetY, pageNumber)
+    ));
     for (const platform of pagePlatforms) {
       world.minTextHeight = Math.min(world.minTextHeight, platform.textHeight);
     }
