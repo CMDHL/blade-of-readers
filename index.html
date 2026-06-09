@@ -10,66 +10,75 @@
   <body>
     <main class="app-shell">
       <header class="topbar">
-        <div class="brand">
-          <span class="brand-mark" aria-hidden="true"></span>
-          <div>
-            <h1>Blade of Readers</h1>
-            <p>Turn paper pages into tiny platformer levels.</p>
+        <div class="topbar-main">
+          <div class="brand">
+            <span class="brand-mark" aria-hidden="true"></span>
+            <div>
+              <h1 data-i18n="appName">Blade of Readers</h1>
+              <p data-i18n="tagline">Turn paper pages into tiny platformer levels.</p>
+            </div>
+          </div>
+
+          <div class="actions">
+            <label class="language-control">
+              <span data-i18n="languageLabel">Language</span>
+              <select id="languageSelect" aria-label="Language" data-i18n-attr="aria-label:languageLabel">
+                <option value="en">English</option>
+                <option value="zh">中文</option>
+              </select>
+            </label>
+            <label class="upload-button">
+              <input id="pdfInput" type="file" accept="application/pdf,.pdf">
+              <span data-i18n="uploadPdf">Upload PDF</span>
+            </label>
+            <button id="collisionButton" type="button" aria-pressed="true" data-i18n="hideCollisions">Hide Collisions</button>
+            <button id="resetButton" type="button" data-i18n="reset">Reset</button>
           </div>
         </div>
 
-        <div class="actions">
-          <label class="upload-button">
-            <input id="pdfInput" type="file" accept="application/pdf,.pdf">
-            Upload PDF
-          </label>
-          <button id="collisionButton" type="button" aria-pressed="true">Hide Collisions</button>
-          <button id="resetButton" type="button">Reset</button>
-        </div>
+        <section id="controlsPanel" class="controls-panel" aria-label="Key mapping" data-i18n-attr="aria-label:controlsLabel">
+          <div class="control-row">
+            <span data-i18n="left">Left</span>
+            <button type="button" data-map-action="left"></button>
+          </div>
+          <div class="control-row">
+            <span data-i18n="right">Right</span>
+            <button type="button" data-map-action="right"></button>
+          </div>
+          <div class="control-row">
+            <span data-i18n="up">Up</span>
+            <button type="button" data-map-action="up"></button>
+          </div>
+          <div class="control-row">
+            <span data-i18n="down">Down</span>
+            <button type="button" data-map-action="down"></button>
+          </div>
+          <div class="control-row">
+            <span data-i18n="jump">Jump</span>
+            <button type="button" data-map-action="jump"></button>
+          </div>
+          <div class="control-row">
+            <span data-i18n="dash">Dash</span>
+            <button type="button" data-map-action="dash"></button>
+          </div>
+        </section>
       </header>
 
-      <section id="controlsPanel" class="controls-panel" aria-label="Key mapping">
-        <div class="control-row">
-          <span>Left</span>
-          <button type="button" data-map-action="left"></button>
-        </div>
-        <div class="control-row">
-          <span>Right</span>
-          <button type="button" data-map-action="right"></button>
-        </div>
-        <div class="control-row">
-          <span>Up</span>
-          <button type="button" data-map-action="up"></button>
-        </div>
-        <div class="control-row">
-          <span>Down</span>
-          <button type="button" data-map-action="down"></button>
-        </div>
-        <div class="control-row">
-          <span>Jump</span>
-          <button type="button" data-map-action="jump"></button>
-        </div>
-        <div class="control-row">
-          <span>Dash</span>
-          <button type="button" data-map-action="dash"></button>
-        </div>
-      </section>
-
-      <section class="reader-stage" aria-label="PDF platformer">
+      <section class="reader-stage" aria-label="PDF platformer" data-i18n-attr="aria-label:readerStageLabel">
         <div id="pdfDocument" class="pdf-document"></div>
         <div id="playerSprite" class="player-sprite" aria-hidden="true">
           <span></span>
         </div>
         <div id="dropZone" class="drop-zone">
-          <strong>Upload a PDF to generate the level</strong>
-          <span>Words and punctuation-separated chunks become invisible platforms at the text itself.</span>
-          <span class="keys">Move: A/D or arrows · Jump: Space · Dash: Shift · Down + Jump: pass through text</span>
+          <strong data-i18n="dropTitle">Upload a PDF to generate the level</strong>
+          <span data-i18n="dropDescription">Words and punctuation-separated chunks become invisible platforms at the text itself.</span>
+          <span class="keys" data-i18n="keysHelp">Move: A/D or arrows · Jump: Space · Dash: Shift · Down + Jump: pass through text</span>
         </div>
       </section>
 
       <footer class="statusbar">
-        <span id="statusText">Waiting for a PDF.</span>
-        <span id="pageText">Page 1</span>
+        <span id="statusText" data-status-key="waiting">Waiting for a PDF.</span>
+        <span id="pageText" data-page="1">Page 1</span>
       </footer>
     </main>
   </body>

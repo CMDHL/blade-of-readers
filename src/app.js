@@ -8,6 +8,7 @@ const input = document.querySelector("#pdfInput");
 const resetButton = document.querySelector("#resetButton");
 const controlsPanel = document.querySelector("#controlsPanel");
 const collisionButton = document.querySelector("#collisionButton");
+const languageSelect = document.querySelector("#languageSelect");
 const dropZone = document.querySelector("#dropZone");
 const statusText = document.querySelector("#statusText");
 const pageText = document.querySelector("#pageText");
@@ -77,11 +78,122 @@ let remappingAction = null;
 let collisionsVisible = true;
 let autoScrollEnabled = true;
 let programmaticScrollUntil = 0;
+let currentLanguage = "en";
+let currentStatus = { key: "waiting", values: {} };
+let currentPageText = { page: 1, total: null };
+
+const translations = {
+  en: {
+    appName: "Blade of Readers",
+    tagline: "Turn complicated articles into simple platformer levels.",
+    languageLabel: "Language",
+    uploadPdf: "Upload PDF",
+    hideCollisions: "Hide Collisions",
+    showCollisions: "Show Collisions",
+    reset: "Reset",
+    controlsLabel: "Key mapping",
+    left: "Left",
+    right: "Right",
+    up: "Up",
+    down: "Down",
+    jump: "Jump",
+    dash: "Dash",
+    readerStageLabel: "PDF platformer",
+    dropTitle: "Upload a PDF to generate the level",
+    dropDescription: "Words and punctuation-separated chunks become invisible platforms at the text itself.",
+    keysHelp: "Move with keys or teleport with mouse clicks.",
+    waiting: "Waiting for a PDF.",
+    readingPdf: "Reading PDF...",
+    loadedPage: "Loaded page {page} of {total}...",
+    generatedPlatforms: "{count} text platforms generated from {total} {pageWord}.",
+    page: "Page {page}",
+    pageOf: "Page {page} of {total}",
+    pageSingular: "page",
+    pagePlural: "pages",
+    pdfReadError: "Could not read that PDF. Try another file.",
+    pressKey: "Press a key",
+  },
+  zh: {
+    appName: "读者之刃",
+    tagline: "把晦涩的文章变成简单的平台关卡。",
+    languageLabel: "语言",
+    uploadPdf: "上传 PDF",
+    hideCollisions: "隐藏碰撞",
+    showCollisions: "显示碰撞",
+    reset: "重置",
+    controlsLabel: "按键映射",
+    left: "左",
+    right: "右",
+    up: "上",
+    down: "下",
+    jump: "跳跃",
+    dash: "冲刺",
+    readerStageLabel: "PDF 平台关卡",
+    dropTitle: "上传 PDF 生成关卡",
+    dropDescription: "单词和由标点分隔的文本片段会在原文位置变成隐形平台。",
+    keysHelp: "按键移动，或鼠标点击目的地以传送",
+    waiting: "等待上传 PDF。",
+    readingPdf: "正在读取 PDF...",
+    loadedPage: "已加载第 {page} 页，共 {total} 页...",
+    generatedPlatforms: "已从 {total} 页生成 {count} 个文字平台。",
+    page: "第 {page} 页",
+    pageOf: "第 {page} 页，共 {total} 页",
+    pageSingular: "page",
+    pagePlural: "pages",
+    pdfReadError: "无法读取这个 PDF，请试试另一个文件。",
+    pressKey: "按一个键",
+  },
+};
 
 playerSprite.hidden = true;
 
-function setStatus(message) {
-  statusText.textContent = message;
+function detectLanguage() {
+  const savedLanguage = localStorage.getItem("bladeOfReadersLanguage");
+  if (savedLanguage && translations[savedLanguage]) return savedLanguage;
+  const browserLanguage = navigator.languages?.[0] || navigator.language || "en";
+  return browserLanguage.toLowerCase().startsWith("zh") ? "zh" : "en";
+}
+
+function t(key, values = {}) {
+  const template = translations[currentLanguage][key] || translations.en[key] || key;
+  return template.replace(/\{(\w+)\}/g, (_, name) => values[name] ?? "");
+}
+
+function setStatus(key, values = {}) {
+  currentStatus = { key, values };
+  statusText.textContent = t(key, values);
+}
+
+function updatePageText(page = currentPageText.page, total = currentPageText.total) {
+  currentPageText = { page, total };
+  pageText.textContent = total ? t("pageOf", { page, total }) : t("page", { page });
+}
+
+function updateCollisionButtonLabel() {
+  collisionButton.textContent = collisionsVisible ? t("hideCollisions") : t("showCollisions");
+}
+
+function applyLanguage(language) {
+  currentLanguage = translations[language] ? language : "en";
+  document.documentElement.lang = currentLanguage === "zh" ? "zh-CN" : "en";
+  document.title = t("appName");
+  languageSelect.value = currentLanguage;
+
+  document.querySelectorAll("[data-i18n]").forEach((element) => {
+    element.textContent = t(element.dataset.i18n);
+  });
+
+  document.querySelectorAll("[data-i18n-attr]").forEach((element) => {
+    for (const pair of element.dataset.i18nAttr.split(",")) {
+      const [attribute, key] = pair.split(":").map((item) => item.trim());
+      if (attribute && key) element.setAttribute(attribute, t(key));
+    }
+  });
+
+  statusText.textContent = t(currentStatus.key, currentStatus.values);
+  updatePageText();
+  updateCollisionButtonLabel();
+  updateControlLabels();
 }
 
 function actionPressed(action) {
@@ -95,7 +207,7 @@ function formatKey(code) {
 function updateControlLabels() {
   document.querySelectorAll("[data-map-action]").forEach((button) => {
     const action = button.dataset.mapAction;
-    button.textContent = remappingAction === action ? "Press a key" : keyMap[action].map(formatKey).join(" / ");
+    button.textContent = remappingAction === action ? t("pressKey") : keyMap[action].map(formatKey).join(" / ");
   });
 }
 
@@ -329,7 +441,7 @@ function clearPdfDocument() {
 }
 
 async function loadPdf(file) {
-  setStatus("Reading PDF...");
+  setStatus("readingPdf");
   const bytes = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
   const firstPage = await pdf.getPage(1);
@@ -377,7 +489,7 @@ async function loadPdf(file) {
     });
     world.platforms.push(...pagePlatforms);
     offsetY += viewport.height + world.pageGap;
-    setStatus(`Loaded page ${pageNumber} of ${pdf.numPages}...`);
+    setStatus("loadedPage", { page: pageNumber, total: pdf.numPages });
   }
 
   world.cssWidth = Math.ceil(Math.max(...world.pages.map((page) => page.width)));
@@ -400,8 +512,12 @@ async function loadPdf(file) {
   resetPlayer();
   playerSprite.hidden = false;
   dropZone.classList.add("is-hidden");
-  pageText.textContent = `Page 1 of ${pdf.numPages}`;
-  setStatus(`${world.platforms.length} text platforms generated from ${pdf.numPages} page${pdf.numPages === 1 ? "" : "s"}.`);
+  updatePageText(1, pdf.numPages);
+  setStatus("generatedPlatforms", {
+    count: world.platforms.length,
+    total: pdf.numPages,
+    pageWord: t(pdf.numPages === 1 ? "pageSingular" : "pagePlural"),
+  });
   autoCenterPlayer();
 }
 
@@ -511,7 +627,7 @@ function updateActivePage() {
   const page = world.pages.find((item) => centerY >= item.y && centerY <= item.y + item.height);
   if (page) {
     world.activePage = page.number;
-    pageText.textContent = `Page ${page.number} of ${world.pages.length}`;
+    updatePageText(page.number, world.pages.length);
   }
 }
 
@@ -621,7 +737,7 @@ async function handlePdfFile(file) {
     await loadPdf(file);
   } catch (error) {
     console.error(error);
-    setStatus("Could not read that PDF. Try another file.");
+    setStatus("pdfReadError");
     dropZone.classList.remove("is-hidden");
   }
 }
@@ -653,9 +769,14 @@ resetButton.addEventListener("click", () => {
 
 collisionButton.addEventListener("click", () => {
   collisionsVisible = !collisionsVisible;
-  collisionButton.textContent = collisionsVisible ? "Hide Collisions" : "Show Collisions";
+  updateCollisionButtonLabel();
   collisionButton.setAttribute("aria-pressed", String(collisionsVisible));
   renderPlayer();
+});
+
+languageSelect.addEventListener("change", () => {
+  localStorage.setItem("bladeOfReadersLanguage", languageSelect.value);
+  applyLanguage(languageSelect.value);
 });
 
 controlsPanel.addEventListener("click", (event) => {
@@ -722,7 +843,7 @@ if (window.visualViewport) {
   });
 }
 
-updateControlLabels();
+applyLanguage(detectLanguage());
 setDocumentSize();
 resetPlayer();
 tick();
