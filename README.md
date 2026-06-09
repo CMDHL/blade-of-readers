@@ -26,7 +26,10 @@ Then open `http://localhost:8000`.
 - hold jump: jump higher, up to a limit
 - down + jump: pass downward through text platforms until jump is released
 - shift or `C`: dash
-- use the `Keys` button to remap movement and jump inputs
+- controller left stick: move
+- controller `A`: jump
+- controller right trigger: dash
+- use the controls bar to remap keyboard inputs and controller jump / dash buttons
 
 ## Notes
 

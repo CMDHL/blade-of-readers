@@ -176,6 +176,20 @@ button:hover {
   background: rgba(255, 255, 255, 0.82);
 }
 
+.control-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.control-group-label {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
 .control-row {
   display: flex;
   align-items: center;
@@ -184,12 +198,27 @@ button:hover {
   font-size: 0.9rem;
 }
 
-.control-row button {
+.control-row button,
+.fixed-control {
   min-width: 86px;
   min-height: 34px;
   padding: 0 10px;
+}
+
+.control-row button {
   color: var(--ink);
   font-weight: 700;
+}
+
+.fixed-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.62);
 }
 
 .reader-stage {

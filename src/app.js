@@ -29,6 +29,31 @@ const keyMap = {
   dash: ["ShiftLeft", "ShiftRight", "KeyC"],
 };
 
+const controllerMap = {
+  jump: [0],
+  dash: [7],
+};
+
+const controllerButtonLabels = {
+  0: "A",
+  1: "B",
+  2: "X",
+  3: "Y",
+  4: "LB",
+  5: "RB",
+  6: "LT",
+  7: "RT",
+  8: "View",
+  9: "Menu",
+  10: "LS",
+  11: "RS",
+  12: "D-pad Up",
+  13: "D-pad Down",
+  14: "D-pad Left",
+  15: "D-pad Right",
+  16: "Home",
+};
+
 const world = {
   cssWidth: 900,
   cssHeight: 720,
@@ -79,7 +104,17 @@ const config = {
 };
 
 const keys = new Set();
+const controllerButtons = new Set();
+const previousControllerButtons = new Set();
+const controllerDirections = {
+  left: false,
+  right: false,
+  up: false,
+  down: false,
+};
 let remappingAction = null;
+let remappingDevice = null;
+let controllerRemapBaseline = new Set();
 let collisionsVisible = true;
 let autoScrollEnabled = true;
 let programmaticScrollUntil = 0;
@@ -97,6 +132,10 @@ const translations = {
     showCollisions: "Show Collisions",
     reset: "Reset",
     controlsLabel: "Key mapping",
+    keyboardControls: "Keyboard",
+    controllerControls: "Controller",
+    move: "Move",
+    leftStick: "Left stick",
     left: "Left",
     right: "Right",
     up: "Up",
@@ -106,7 +145,7 @@ const translations = {
     readerStageLabel: "PDF platformer",
     dropTitle: "Upload a PDF to generate the level",
     dropDescription: "Words and punctuation-separated chunks become invisible platforms at the text itself.",
-    keysHelp: "Move with keys or teleport with mouse clicks.",
+    keysHelp: "Move with keys or left stick. Jump: Space / A. Dash: Shift / RT. Mouse click teleports.",
     loadingTitle: "Loading PDF...",
     loadingDescription: "Preparing the level before switching views.",
     waiting: "Waiting for a PDF.",
@@ -119,6 +158,7 @@ const translations = {
     pagePlural: "pages",
     pdfReadError: "Could not read that PDF. Try another file.",
     pressKey: "Press a key",
+    pressButton: "Press button",
   },
   zh: {
     appName: "读者之刃",
@@ -129,6 +169,10 @@ const translations = {
     showCollisions: "显示碰撞",
     reset: "重置",
     controlsLabel: "按键映射",
+    keyboardControls: "键盘",
+    controllerControls: "手柄",
+    move: "移动",
+    leftStick: "左摇杆",
     left: "左",
     right: "右",
     up: "上",
@@ -138,7 +182,7 @@ const translations = {
     readerStageLabel: "PDF 平台关卡",
     dropTitle: "上传 PDF 生成关卡",
     dropDescription: "单词和由标点分隔的文本片段会在原文位置变成隐形平台。",
-    keysHelp: "按键移动，或鼠标点击目的地以传送",
+    keysHelp: "按键或左摇杆移动。跳跃：空格 / A。冲刺：Shift / RT。鼠标点击可传送。",
     loadingTitle: "正在加载 PDF...",
     loadingDescription: "正在准备关卡，完成后会切换显示。",
     waiting: "等待上传 PDF。",
@@ -151,6 +195,7 @@ const translations = {
     pagePlural: "pages",
     pdfReadError: "无法读取这个 PDF，请试试另一个文件。",
     pressKey: "按一个键",
+    pressButton: "按一个按钮",
   },
 };
 
@@ -206,7 +251,9 @@ function applyLanguage(language) {
 }
 
 function actionPressed(action) {
-  return keyMap[action].some((code) => keys.has(code));
+  if (keyMap[action]?.some((code) => keys.has(code))) return true;
+  if (controllerDirections[action]) return true;
+  return controllerMap[action]?.some((button) => controllerButtons.has(button)) || false;
 }
 
 function formatKey(code) {
@@ -223,10 +270,29 @@ function formatKeyList(codes) {
   return labels.join(" / ");
 }
 
+function formatControllerButton(button) {
+  return controllerButtonLabels[button] || `B${button}`;
+}
+
+function formatControllerButtonList(buttons) {
+  const labels = [];
+  for (const button of buttons) {
+    const label = formatControllerButton(button);
+    if (!labels.includes(label)) labels.push(label);
+  }
+  return labels.join(" / ");
+}
+
 function updateControlLabels() {
   document.querySelectorAll("[data-map-action]").forEach((button) => {
     const action = button.dataset.mapAction;
-    button.textContent = remappingAction === action ? t("pressKey") : formatKeyList(keyMap[action]);
+    const device = button.dataset.mapDevice;
+    const isRemapping = remappingAction === action && remappingDevice === device;
+    if (device === "controller") {
+      button.textContent = isRemapping ? t("pressButton") : formatControllerButtonList(controllerMap[action]);
+      return;
+    }
+    button.textContent = isRemapping ? t("pressKey") : formatKeyList(keyMap[action]);
   });
 }
 
@@ -846,7 +912,74 @@ function teleportPlayerToClick(event) {
   renderPlayer();
 }
 
+function activeGamepad() {
+  const gamepads = navigator.getGamepads?.() || [];
+  return Array.from(gamepads).find(Boolean) || null;
+}
+
+function pressedGamepadButtons(gamepad) {
+  const pressed = new Set();
+  if (!gamepad) return pressed;
+  gamepad.buttons.forEach((button, index) => {
+    if (button.pressed || button.value > 0.5) pressed.add(index);
+  });
+  return pressed;
+}
+
+function updateControllerInput() {
+  const gamepad = activeGamepad();
+  const pressedButtons = pressedGamepadButtons(gamepad);
+  const axisX = gamepad?.axes?.[0] || 0;
+  const axisY = gamepad?.axes?.[1] || 0;
+  const deadzone = 0.35;
+
+  controllerDirections.left = axisX < -deadzone;
+  controllerDirections.right = axisX > deadzone;
+  controllerDirections.up = axisY < -deadzone;
+  controllerDirections.down = axisY > deadzone;
+
+  controllerButtons.clear();
+  pressedButtons.forEach((button) => controllerButtons.add(button));
+
+  if (remappingDevice === "controller" && remappingAction) {
+    const selectedButton = [...pressedButtons].find((button) => !controllerRemapBaseline.has(button));
+    if (selectedButton !== undefined) {
+      for (const action of Object.keys(controllerMap)) {
+        controllerMap[action] = controllerMap[action].filter((button) => button !== selectedButton);
+      }
+      controllerMap[remappingAction] = [selectedButton];
+      remappingAction = null;
+      remappingDevice = null;
+      controllerRemapBaseline = new Set();
+      updateControlLabels();
+    }
+  } else {
+    const jumpPressed = controllerMap.jump.some((button) => controllerButtons.has(button));
+    const jumpWasPressed = controllerMap.jump.some((button) => previousControllerButtons.has(button));
+    const dashPressed = controllerMap.dash.some((button) => controllerButtons.has(button));
+    const dashWasPressed = controllerMap.dash.some((button) => previousControllerButtons.has(button));
+
+    if (jumpPressed && !jumpWasPressed) {
+      restartAutoScroll();
+      startJump();
+    }
+    if (dashPressed && !dashWasPressed) {
+      restartAutoScroll();
+      startDash();
+    }
+    if (!jumpPressed && jumpWasPressed) {
+      player.jumpHeld = false;
+      player.dropThrough = false;
+      if (player.vy < 0) player.vy = 0;
+    }
+  }
+
+  previousControllerButtons.clear();
+  pressedButtons.forEach((button) => previousControllerButtons.add(button));
+}
+
 function tick() {
+  updateControllerInput();
   if (world.loaded) updatePlayer();
   renderPlayer();
   requestAnimationFrame(tick);
@@ -907,17 +1040,22 @@ controlsPanel.addEventListener("click", (event) => {
   const button = event.target.closest("[data-map-action]");
   if (!button) return;
   remappingAction = button.dataset.mapAction;
+  remappingDevice = button.dataset.mapDevice;
+  controllerRemapBaseline = remappingDevice === "controller"
+    ? pressedGamepadButtons(activeGamepad())
+    : new Set();
   updateControlLabels();
 });
 
 window.addEventListener("keydown", (event) => {
-  if (remappingAction) {
+  if (remappingDevice === "keyboard" && remappingAction) {
     event.preventDefault();
     for (const action of Object.keys(keyMap)) {
       keyMap[action] = keyMap[action].filter((code) => code !== event.code);
     }
     keyMap[remappingAction] = [event.code];
     remappingAction = null;
+    remappingDevice = null;
     updateControlLabels();
     return;
   }

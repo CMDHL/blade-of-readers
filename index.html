@@ -37,29 +37,48 @@
         </div>
 
         <section id="controlsPanel" class="controls-panel" aria-label="Key mapping" data-i18n-attr="aria-label:controlsLabel">
-          <div class="control-row">
-            <span data-i18n="left">Left</span>
-            <button type="button" data-map-action="left"></button>
+          <div class="control-group">
+            <span class="control-group-label" data-i18n="keyboardControls">Keyboard</span>
+            <div class="control-row">
+              <span data-i18n="left">Left</span>
+              <button type="button" data-map-device="keyboard" data-map-action="left"></button>
+            </div>
+            <div class="control-row">
+              <span data-i18n="right">Right</span>
+              <button type="button" data-map-device="keyboard" data-map-action="right"></button>
+            </div>
+            <div class="control-row">
+              <span data-i18n="up">Up</span>
+              <button type="button" data-map-device="keyboard" data-map-action="up"></button>
+            </div>
+            <div class="control-row">
+              <span data-i18n="down">Down</span>
+              <button type="button" data-map-device="keyboard" data-map-action="down"></button>
+            </div>
+            <div class="control-row">
+              <span data-i18n="jump">Jump</span>
+              <button type="button" data-map-device="keyboard" data-map-action="jump"></button>
+            </div>
+            <div class="control-row">
+              <span data-i18n="dash">Dash</span>
+              <button type="button" data-map-device="keyboard" data-map-action="dash"></button>
+            </div>
           </div>
-          <div class="control-row">
-            <span data-i18n="right">Right</span>
-            <button type="button" data-map-action="right"></button>
-          </div>
-          <div class="control-row">
-            <span data-i18n="up">Up</span>
-            <button type="button" data-map-action="up"></button>
-          </div>
-          <div class="control-row">
-            <span data-i18n="down">Down</span>
-            <button type="button" data-map-action="down"></button>
-          </div>
-          <div class="control-row">
-            <span data-i18n="jump">Jump</span>
-            <button type="button" data-map-action="jump"></button>
-          </div>
-          <div class="control-row">
-            <span data-i18n="dash">Dash</span>
-            <button type="button" data-map-action="dash"></button>
+
+          <div class="control-group">
+            <span class="control-group-label" data-i18n="controllerControls">Controller</span>
+            <div class="control-row">
+              <span data-i18n="move">Move</span>
+              <span class="fixed-control" data-i18n="leftStick">Left stick</span>
+            </div>
+            <div class="control-row">
+              <span data-i18n="jump">Jump</span>
+              <button type="button" data-map-device="controller" data-map-action="jump"></button>
+            </div>
+            <div class="control-row">
+              <span data-i18n="dash">Dash</span>
+              <button type="button" data-map-device="controller" data-map-action="dash"></button>
+            </div>
           </div>
         </section>
       </header>
