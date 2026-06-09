@@ -205,6 +205,12 @@ button:hover {
   position: relative;
   min-width: min(100vw - 36px, 900px);
   min-height: min(76vh, 860px);
+  opacity: 1;
+  transition: opacity 160ms ease;
+}
+
+.pdf-document.is-loading {
+  opacity: 0;
 }
 
 .pdf-page {
@@ -297,10 +303,31 @@ button:hover {
   display: none;
 }
 
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-content: center;
+  gap: 10px;
+  padding: 24px;
+  text-align: center;
+  color: #20242c;
+  background:
+    linear-gradient(rgba(248, 248, 245, 0.92), rgba(248, 248, 245, 0.96)),
+    repeating-linear-gradient(0deg, transparent 0 32px, rgba(25, 118, 111, 0.12) 32px 33px);
+}
+
+.loading-overlay.is-hidden {
+  display: none;
+}
+
+.loading-overlay strong,
 .drop-zone strong {
   font-size: clamp(1.25rem, 2.5vw, 2rem);
 }
 
+.loading-overlay span,
 .drop-zone span {
   color: var(--muted);
 }

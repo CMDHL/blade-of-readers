@@ -10,6 +10,7 @@ const controlsPanel = document.querySelector("#controlsPanel");
 const collisionButton = document.querySelector("#collisionButton");
 const languageSelect = document.querySelector("#languageSelect");
 const dropZone = document.querySelector("#dropZone");
+const loadingOverlay = document.querySelector("#loadingOverlay");
 const statusText = document.querySelector("#statusText");
 const pageText = document.querySelector("#pageText");
 
@@ -22,8 +23,8 @@ const keyMap = {
   right: ["ArrowRight", "KeyD"],
   up: ["ArrowUp", "KeyW"],
   down: ["ArrowDown", "KeyS"],
-  jump: ["Space"],
-  dash: ["ShiftLeft", "ShiftRight"],
+  jump: ["Space", "KeyZ"],
+  dash: ["ShiftLeft", "ShiftRight", "KeyC"],
 };
 
 const world = {
@@ -102,6 +103,8 @@ const translations = {
     dropTitle: "Upload a PDF to generate the level",
     dropDescription: "Words and punctuation-separated chunks become invisible platforms at the text itself.",
     keysHelp: "Move with keys or teleport with mouse clicks.",
+    loadingTitle: "Loading PDF...",
+    loadingDescription: "Preparing the level before switching views.",
     waiting: "Waiting for a PDF.",
     readingPdf: "Reading PDF...",
     loadedPage: "Loaded page {page} of {total}...",
@@ -132,6 +135,8 @@ const translations = {
     dropTitle: "上传 PDF 生成关卡",
     dropDescription: "单词和由标点分隔的文本片段会在原文位置变成隐形平台。",
     keysHelp: "按键移动，或鼠标点击目的地以传送",
+    loadingTitle: "正在加载 PDF...",
+    loadingDescription: "正在准备关卡，完成后会切换显示。",
     waiting: "等待上传 PDF。",
     readingPdf: "正在读取 PDF...",
     loadedPage: "已加载第 {page} 页，共 {total} 页...",
@@ -201,13 +206,23 @@ function actionPressed(action) {
 }
 
 function formatKey(code) {
+  if (code === "ShiftLeft" || code === "ShiftRight") return "Shift";
   return code.replace("Arrow", "").replace("Key", "").replace("Space", "Space");
+}
+
+function formatKeyList(codes) {
+  const labels = [];
+  for (const code of codes) {
+    const label = formatKey(code);
+    if (!labels.includes(label)) labels.push(label);
+  }
+  return labels.join(" / ");
 }
 
 function updateControlLabels() {
   document.querySelectorAll("[data-map-action]").forEach((button) => {
     const action = button.dataset.mapAction;
-    button.textContent = remappingAction === action ? t("pressKey") : keyMap[action].map(formatKey).join(" / ");
+    button.textContent = remappingAction === action ? t("pressKey") : formatKeyList(keyMap[action]);
   });
 }
 
@@ -393,14 +408,32 @@ function buildWrapPortals() {
       if (!from || !to) continue;
 
       const portalHeight = from.textHeight;
+      const portalWidth = Math.max(4, from.textHeight * 0.55);
+      const portalGap = Math.max(2, from.textHeight * 0.16);
       portals.push({
-        x: from.x + from.width + Math.max(2, from.textHeight * 0.16),
+        x: from.x + from.width + portalGap,
         y: from.y + from.height - portalHeight,
-        width: Math.max(4, from.textHeight * 0.55),
+        width: portalWidth,
         height: portalHeight,
         page: pageNumber,
+        direction: 1,
+        sourcePlatform: from,
+        targetPlatform: to,
         targetX: to.x,
         targetY: to.y,
+        type: "portal",
+      });
+      portals.push({
+        x: to.x - portalGap - portalWidth,
+        y: to.y + to.height - portalHeight,
+        width: portalWidth,
+        height: portalHeight,
+        page: pageNumber,
+        direction: -1,
+        sourcePlatform: to,
+        targetPlatform: from,
+        targetX: from.x + from.width - player.width,
+        targetY: from.y,
         type: "portal",
       });
     }
@@ -440,7 +473,18 @@ function clearPdfDocument() {
   pdfDocument.append(playerSprite);
 }
 
+function setLoadingPdf(isLoading) {
+  pdfDocument.classList.toggle("is-loading", isLoading);
+  loadingOverlay.classList.toggle("is-hidden", !isLoading);
+  loadingOverlay.setAttribute("aria-busy", String(isLoading));
+}
+
 async function loadPdf(file) {
+  world.loaded = false;
+  playerSprite.hidden = true;
+  dropZone.classList.add("is-hidden");
+  clearPdfDocument();
+  setLoadingPdf(true);
   setStatus("readingPdf");
   const bytes = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
@@ -454,7 +498,6 @@ async function loadPdf(file) {
   world.platforms = [];
   world.portals = [];
   world.minTextHeight = Infinity;
-  clearPdfDocument();
 
   let offsetY = 0;
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
@@ -510,8 +553,8 @@ async function loadPdf(file) {
   buildWrapPortals();
   renderCollisionLayer();
   resetPlayer();
+  setLoadingPdf(false);
   playerSprite.hidden = false;
-  dropZone.classList.add("is-hidden");
   updatePageText(1, pdf.numPages);
   setStatus("generatedPlatforms", {
     count: world.platforms.length,
@@ -605,15 +648,30 @@ function collideWithPlatforms(previousY) {
   }
 }
 
+function playerSupportedByPlatform(platform) {
+  if (!platform || player.dropThrough) return false;
+  const supportX = player.x + player.width / 2;
+  const footY = player.y + player.height;
+  const horizontalTolerance = Math.max(1, platform.textHeight * 0.08);
+  const verticalTolerance = Math.max(2, platform.height + Math.abs(player.vy) + config.gravity);
+  const centeredOnPlatform = supportX >= platform.x - horizontalTolerance && supportX <= platform.x + platform.width + horizontalTolerance;
+  const standingOnPlatform = Math.abs(footY - platform.y) <= verticalTolerance;
+  return player.grounded && centeredOnPlatform && standingOnPlatform;
+}
+
 function useWrapPortal(previousX) {
-  if (player.vx <= 0) return false;
   for (const portal of activeWrapPortals()) {
-    const crossedDoor = previousX + player.width <= portal.x && player.x + player.width >= portal.x;
+    if (Math.sign(player.vx) !== portal.direction) continue;
+    if (!playerSupportedByPlatform(portal.sourcePlatform)) continue;
+    const portalEdge = portal.direction > 0 ? portal.x : portal.x + portal.width;
+    const crossedDoor = portal.direction > 0
+      ? previousX + player.width <= portalEdge && player.x + player.width >= portalEdge
+      : previousX >= portalEdge && player.x <= portalEdge;
     const verticallyAligned = player.y + player.height >= portal.y && player.y <= portal.y + portal.height;
     if (!crossedDoor || !verticallyAligned) continue;
     player.x = portal.targetX;
     player.y = Math.max(0, portal.targetY - player.height);
-    player.vx = Math.min(config.moveSpeed, Math.max(1, player.vx));
+    player.vx = portal.direction * Math.min(config.moveSpeed, Math.max(1, Math.abs(player.vx)));
     player.vy = 0;
     player.grounded = true;
     player.groundedByViewport = false;
@@ -737,6 +795,9 @@ async function handlePdfFile(file) {
     await loadPdf(file);
   } catch (error) {
     console.error(error);
+    setLoadingPdf(false);
+    world.loaded = false;
+    playerSprite.hidden = true;
     setStatus("pdfReadError");
     dropZone.classList.remove("is-hidden");
   }

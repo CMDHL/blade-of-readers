@@ -22,9 +22,10 @@ Then open `http://localhost:8000`.
 ## Controls
 
 - `A` / `D` or left / right arrows: move
-- space: jump
+- space or `Z`: jump
 - hold jump: jump higher, up to a limit
 - down + jump: pass downward through text platforms until jump is released
+- shift or `C`: dash
 - use the `Keys` button to remap movement and jump inputs
 
 ## Notes
