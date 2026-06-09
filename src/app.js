@@ -40,6 +40,8 @@ const world = {
   pageGap: 28,
   minTextHeight: 16,
   activePage: 1,
+  activePlatformLineId: null,
+  renderedActivePlatformLineId: null,
 };
 
 const player = {
@@ -434,6 +436,13 @@ function buildWrapPortals() {
     }
 
     lines.sort((a, b) => a.y - b.y);
+    lines.forEach((line, index) => {
+      const lineId = `${pageNumber}:${index}`;
+      for (const platform of line.platforms) {
+        platform.lineId = lineId;
+      }
+    });
+
     for (let index = 0; index < lines.length - 1; index += 1) {
       const fromLine = lines[index].platforms.sort((a, b) => a.x - b.x);
       const toLine = lines[index + 1].platforms.sort((a, b) => a.x - b.x);
@@ -478,12 +487,14 @@ function buildWrapPortals() {
 
 function renderCollisionLayer() {
   pdfDocument.querySelector(".collision-layer")?.remove();
+  world.renderedActivePlatformLineId = null;
   const layer = document.createElement("div");
   layer.className = "collision-layer";
 
   for (const platform of world.platforms) {
     const shape = document.createElement("div");
     shape.className = "collision-shape";
+    shape.dataset.lineId = platform.lineId || "";
     shape.style.transform = `translate(${platform.x}px, ${platform.y}px)`;
     shape.style.width = `${platform.width}px`;
     shape.style.height = `${platform.height}px`;
@@ -531,6 +542,7 @@ async function loadPdf(file) {
   world.pages = [];
   world.platforms = [];
   world.portals = [];
+  world.activePlatformLineId = null;
   world.minTextHeight = Infinity;
 
   let offsetY = 0;
@@ -678,6 +690,7 @@ function collideWithPlatforms(previousY) {
       player.vy = 0;
       player.grounded = true;
       player.groundedByViewport = false;
+      world.activePlatformLineId = platform.lineId || world.activePlatformLineId;
     }
   }
 }
@@ -709,6 +722,7 @@ function useWrapPortal(previousX) {
     player.vy = 0;
     player.grounded = true;
     player.groundedByViewport = false;
+    world.activePlatformLineId = portal.targetPlatform.lineId || world.activePlatformLineId;
     return true;
   }
   return false;
@@ -781,6 +795,11 @@ function renderPlayer() {
   playerSprite.classList.toggle("is-grounded", player.grounded);
   playerSprite.classList.toggle("is-facing-right", player.vx >= 0);
   pdfDocument.classList.toggle("show-collisions", collisionsVisible);
+  if (world.renderedActivePlatformLineId === world.activePlatformLineId) return;
+  for (const shape of pdfDocument.querySelectorAll(".collision-shape")) {
+    shape.classList.toggle("is-line-highlighted", shape.dataset.lineId === world.activePlatformLineId);
+  }
+  world.renderedActivePlatformLineId = world.activePlatformLineId;
 }
 
 function markManualScrollIntent() {

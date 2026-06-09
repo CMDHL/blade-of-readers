@@ -258,6 +258,11 @@ button:hover {
   outline: 1px solid rgba(17, 84, 79, 0.62);
 }
 
+.collision-shape.is-line-highlighted {
+  background: rgba(217, 92, 48, 0.26);
+  outline-color: rgba(151, 51, 21, 0.66);
+}
+
 .wrap-portal {
   background:
     linear-gradient(90deg, rgba(242, 193, 78, 0.12), rgba(242, 193, 78, 0.42)),
