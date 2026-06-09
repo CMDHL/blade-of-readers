@@ -624,11 +624,36 @@ function buildWrapPortals() {
   world.portals = portals;
 }
 
+function activeLineMarkerBounds(lineId) {
+  if (!lineId) return null;
+  const platforms = world.platforms.filter((platform) => platform.lineId === lineId);
+  if (!platforms.length) return null;
+
+  const left = Math.min(...platforms.map((platform) => platform.x));
+  const right = Math.max(...platforms.map((platform) => platform.x + platform.width));
+  const bottom = Math.max(...platforms.map((platform) => (
+    platform.y + Math.max(platform.textHeight || 0, platform.height || 0)
+  )));
+  const height = Math.max(2, Math.min(4, world.minTextHeight * 0.16));
+  const padding = Math.max(2, world.minTextHeight * 0.12);
+
+  return {
+    x: Math.max(0, left - padding),
+    y: bottom + Math.max(1, height * 0.5),
+    width: Math.min(world.cssWidth, right + padding) - Math.max(0, left - padding),
+    height,
+  };
+}
+
 function renderCollisionLayer() {
   pdfDocument.querySelector(".collision-layer")?.remove();
   world.renderedActivePlatformLineId = null;
   const layer = document.createElement("div");
   layer.className = "collision-layer";
+
+  const activeLineMarker = document.createElement("div");
+  activeLineMarker.className = "active-line-marker";
+  layer.append(activeLineMarker);
 
   for (const platform of world.platforms) {
     const shape = document.createElement("div");
@@ -650,6 +675,19 @@ function renderCollisionLayer() {
   }
 
   pdfDocument.insertBefore(layer, playerSprite);
+}
+
+function renderActiveLineMarker(lineId) {
+  const marker = pdfDocument.querySelector(".active-line-marker");
+  if (!marker) return;
+
+  const bounds = activeLineMarkerBounds(lineId);
+  marker.classList.toggle("is-visible", Boolean(bounds));
+  if (!bounds) return;
+
+  marker.style.transform = `translate(${bounds.x}px, ${bounds.y}px)`;
+  marker.style.width = `${bounds.width}px`;
+  marker.style.height = `${bounds.height}px`;
 }
 
 function clearPdfDocument() {
@@ -940,6 +978,7 @@ function renderPlayer() {
   for (const shape of pdfDocument.querySelectorAll(".collision-shape")) {
     shape.classList.toggle("is-line-highlighted", shape.dataset.lineId === world.activePlatformLineId);
   }
+  renderActiveLineMarker(world.activePlatformLineId);
   world.renderedActivePlatformLineId = world.activePlatformLineId;
 }
 
