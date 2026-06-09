@@ -131,6 +131,7 @@ const textSelection = {
   startIndex: null,
   endIndex: null,
 };
+let activeBladeSwing = null;
 
 const translations = {
   en: {
@@ -608,11 +609,12 @@ function buildWrapPortals() {
       const portalHeight = from.textHeight;
       const portalWidth = Math.max(4, from.textHeight * 0.55);
       const portalAttachOverlap = Math.max(1, from.textHeight * 0.05);
+      const portalStandOverlap = Math.max(2, portalHeight * 0.2);
       const fromEdge = from.x + from.width;
       const toEdge = to.x;
       portals.push({
         x: fromEdge - portalAttachOverlap,
-        y: from.y + from.height - portalHeight,
+        y: from.y - portalHeight + portalStandOverlap,
         width: portalWidth + portalAttachOverlap,
         height: portalHeight,
         page: pageNumber,
@@ -626,7 +628,7 @@ function buildWrapPortals() {
       });
       portals.push({
         x: toEdge - portalWidth,
-        y: to.y + to.height - portalHeight,
+        y: to.y - portalHeight + portalStandOverlap,
         width: portalWidth + portalAttachOverlap,
         height: portalHeight,
         page: pageNumber,
@@ -811,15 +813,35 @@ function closestBladeHit(hitbox) {
     ))[0] || null;
 }
 
-function showBlade(hitbox, direction) {
-  pdfDocument.querySelector(".blade-swing")?.remove();
+function clearBladeSwing() {
+  if (!activeBladeSwing) return;
+  window.clearTimeout(activeBladeSwing.timeoutId);
+  activeBladeSwing.element.remove();
+  activeBladeSwing = null;
+}
+
+function renderBladeSwing() {
+  if (!activeBladeSwing) return;
+  const hitbox = bladeHitbox(activeBladeSwing.direction);
+  activeBladeSwing.element.style.transform = `translate(${hitbox.x}px, ${hitbox.y}px)`;
+  activeBladeSwing.element.style.width = `${hitbox.width}px`;
+  activeBladeSwing.element.style.height = `${hitbox.height}px`;
+}
+
+function showBlade(direction) {
+  clearBladeSwing();
   const blade = document.createElement("div");
   blade.className = `blade-swing blade-swing-${direction.name}`;
-  blade.style.transform = `translate(${hitbox.x}px, ${hitbox.y}px)`;
-  blade.style.width = `${hitbox.width}px`;
-  blade.style.height = `${hitbox.height}px`;
   pdfDocument.append(blade);
-  window.setTimeout(() => blade.remove(), config.bladeDurationMs);
+  activeBladeSwing = {
+    element: blade,
+    direction,
+    timeoutId: window.setTimeout(() => {
+      if (activeBladeSwing?.element === blade) activeBladeSwing = null;
+      blade.remove();
+    }, config.bladeDurationMs),
+  };
+  renderBladeSwing();
 }
 
 function activeLineMarkerBounds(lineId) {
@@ -889,6 +911,7 @@ function renderActiveLineMarker(lineId) {
 }
 
 function clearPdfDocument() {
+  clearBladeSwing();
   pdfDocument.replaceChildren();
   pdfDocument.append(playerSprite);
 }
@@ -1063,7 +1086,7 @@ function startAttack() {
   const direction = attackDirection();
   if (direction.x !== 0) player.facingDirection = direction.x;
   const hitbox = bladeHitbox(direction);
-  showBlade(hitbox, direction);
+  showBlade(direction);
   const hitPlatform = closestBladeHit(hitbox);
   if (hitPlatform) {
     updateTextSelection(hitPlatform);
@@ -1197,6 +1220,7 @@ function renderPlayer() {
   playerSprite.style.transform = `translate(${player.x}px, ${player.y}px)`;
   playerSprite.classList.toggle("is-grounded", player.grounded);
   playerSprite.classList.toggle("is-facing-right", player.facingDirection >= 0);
+  renderBladeSwing();
   pdfDocument.classList.toggle("show-collisions", collisionsVisible);
   if (world.renderedActivePlatformLineId === world.activePlatformLineId) return;
   for (const shape of pdfDocument.querySelectorAll(".collision-shape")) {
