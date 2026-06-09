@@ -3,6 +3,7 @@ import * as pdfjsLib from "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38
 const PDFJS_SRC = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs";
 
 const pdfDocument = document.querySelector("#pdfDocument");
+const readerStage = document.querySelector(".reader-stage");
 const playerSprite = document.querySelector("#playerSprite");
 const input = document.querySelector("#pdfInput");
 const resetButton = document.querySelector("#resetButton");
@@ -795,6 +796,16 @@ function restartAutoScroll() {
 
 function teleportPlayerToClick(event) {
   if (!world.loaded || event.button !== 0) return;
+  const stageRect = readerStage.getBoundingClientRect();
+  if (
+    event.clientX < stageRect.left ||
+    event.clientX > stageRect.right ||
+    event.clientY < stageRect.top ||
+    event.clientY > stageRect.bottom
+  ) {
+    return;
+  }
+
   const offset = documentPageOffset();
   const viewport = viewportPageRect();
   player.x = event.clientX + viewport.left - offset.left - player.width / 2;
