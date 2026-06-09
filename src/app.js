@@ -17,6 +17,7 @@ const pageText = document.querySelector("#pageText");
 pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_SRC;
 
 const punctuationPattern = /[\s.,;:!?()[\]{}"'`~@#$%^&*_+=<>/\\|，。？！、；：（）【】《》“”‘’—…·「」『』]+/u;
+const textSegmentPattern = /[\s.,;:!?()[\]{}"'`~@#$%^&*_+=<>/\\|，。？！、；：（）【】《》“”‘’—…·「」『』]+|[^\s.,;:!?()[\]{}"'`~@#$%^&*_+=<>/\\|，。？！、；：（）【】《》“”‘’—…·「」『』]+/gu;
 
 const keyMap = {
   left: ["ArrowLeft", "KeyA"],
@@ -347,35 +348,67 @@ function resetPlayer() {
   renderPlayer();
 }
 
+function textAdvanceWidth(text, fontHeight) {
+  let width = 0;
+  for (const char of text) {
+    if (/\s/u.test(char)) {
+      width += fontHeight * 0.32;
+    } else if (/[\u2E80-\u9FFF\uAC00-\uD7AF\u3040-\u30FF]/u.test(char)) {
+      width += fontHeight;
+    } else if (punctuationPattern.test(char)) {
+      width += fontHeight * 0.34;
+    } else if (/[ilI1]/u.test(char)) {
+      width += fontHeight * 0.28;
+    } else if (/[mwMW]/u.test(char)) {
+      width += fontHeight * 0.82;
+    } else {
+      width += fontHeight * 0.52;
+    }
+  }
+  return width;
+}
+
 function splitTextIntoPlatforms(item, viewport, pageOffsetY, pageNumber) {
   const text = item.str || "";
-  const chunks = text.split(punctuationPattern).filter(Boolean);
-  if (!chunks.length) return [];
+  const segments = text.match(textSegmentPattern) || [];
+  const textSegments = segments.filter((segment) => !punctuationPattern.test(segment));
+  if (!textSegments.length) return [];
 
   const transform = pdfjsLib.Util.transform(viewport.transform, item.transform);
   const x = transform[4];
   const y = transform[5] + pageOffsetY;
   const fontHeight = Math.max(1, Math.hypot(transform[2], transform[3]) || item.height || 10);
-  const totalTextWidth = Math.max(item.width || 0, chunks.join("").length * fontHeight * 0.48);
-  const compactLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-  const separatorCount = Math.max(0, chunks.length - 1);
-  const gap = separatorCount ? Math.min(fontHeight * 0.45, totalTextWidth * 0.08) : 0;
-  const usableWidth = Math.max(config.platformMinWidth, totalTextWidth - gap * separatorCount);
+  const measuredWidth = textAdvanceWidth(text, fontHeight);
+  const pdfTextWidth = (item.width || 0) * viewport.scale;
+  const totalTextWidth = Math.max(pdfTextWidth, measuredWidth, text.length * fontHeight * 0.48);
+  const segmentWidths = segments.map((segment) => textAdvanceWidth(segment, fontHeight));
+  const separatorWidth = segments.reduce(
+    (sum, segment, index) => sum + (punctuationPattern.test(segment) ? segmentWidths[index] : 0),
+    0,
+  );
+  const extraGapWidth = Math.max(0, totalTextWidth - measuredWidth);
+  const shrinkRatio = totalTextWidth < measuredWidth ? totalTextWidth / Math.max(measuredWidth, 1) : 1;
   let cursor = x;
 
-  return chunks.map((chunk) => {
-    const width = Math.max(config.platformMinWidth, usableWidth * (chunk.length / Math.max(compactLength, 1)));
-    const rect = {
+  return segments.flatMap((segment, index) => {
+    let width = segmentWidths[index] * shrinkRatio;
+    if (punctuationPattern.test(segment)) {
+      width += separatorWidth > 0 ? extraGapWidth * (segmentWidths[index] / separatorWidth) : 0;
+      cursor += width;
+      return [];
+    }
+
+    const platform = {
       x: cursor,
       y: y - fontHeight * 0.78,
-      width,
+      width: Math.max(config.platformMinWidth, width),
       height: Math.max(2, fontHeight * 0.2),
       textHeight: fontHeight,
       page: pageNumber,
       type: "text",
     };
-    cursor += width + gap;
-    return rect;
+    cursor += width;
+    return [platform];
   });
 }
 
