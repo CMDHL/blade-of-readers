@@ -43,7 +43,8 @@ input {
 }
 
 .topbar,
-.statusbar {
+.statusbar,
+.controls-panel {
   width: min(1440px, 100%);
   margin: 0 auto;
 }
@@ -133,24 +134,97 @@ button:hover {
   pointer-events: none;
 }
 
+.controls-panel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.controls-panel[hidden] {
+  display: none;
+}
+
+.control-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.control-row button {
+  min-width: 86px;
+  min-height: 34px;
+  padding: 0 10px;
+  color: var(--ink);
+  font-weight: 700;
+}
+
 .reader-stage {
   position: relative;
-  width: min(1440px, 100%);
+  width: fit-content;
   min-height: 0;
   margin: 0 auto;
-  border: 1px solid #c6cbd4;
-  border-radius: 8px;
-  background: #20242c;
-  overflow: hidden;
+  background: transparent;
+  overflow: visible;
+}
+
+.pdf-document {
+  position: relative;
+  min-width: min(100vw - 36px, 900px);
+  min-height: min(76vh, 860px);
+}
+
+.pdf-document.is-manual-scroll .pdf-page {
+  opacity: 0.5;
+}
+
+.pdf-page {
+  display: block;
+  background: #fff;
   box-shadow: var(--shadow);
 }
 
-#gameCanvas {
-  display: block;
-  width: 100%;
-  height: 100%;
-  min-height: min(76vh, 860px);
-  background: #f8f8f5;
+.pdf-page + .pdf-page {
+  margin-top: 28px;
+}
+
+.player-sprite {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  width: 16px;
+  height: 16px;
+  background: #ba3b46;
+  border: 1px solid #17191f;
+  pointer-events: none;
+  will-change: transform, width, height;
+}
+
+.player-sprite.is-grounded {
+  background: #19766f;
+}
+
+.player-sprite span {
+  position: absolute;
+  top: 24%;
+  width: 18%;
+  aspect-ratio: 1;
+  background: #fff;
+}
+
+.player-sprite.is-facing-right span {
+  right: 20%;
+}
+
+.player-sprite:not(.is-facing-right) span {
+  left: 20%;
 }
 
 .drop-zone {
@@ -215,7 +289,7 @@ button:hover {
     flex: 1 1 130px;
   }
 
-  #gameCanvas {
+  .pdf-document {
     min-height: 72vh;
   }
 }

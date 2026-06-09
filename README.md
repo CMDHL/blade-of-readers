@@ -2,11 +2,12 @@
 
 A tiny browser game prototype for turning a PDF paper into a platformer level.
 
-Upload a PDF and the first page is parsed in the browser:
+Upload a PDF and its pages are parsed in the browser:
 
-- text chunks split by spaces and punctuation become thin platforms
-- large rendered non-text regions are inferred as image or figure blocks
-- the square reader can move, wall-jump, climb screen edges, and use variable-height jumps
+- text chunks split by spaces and punctuation become collision platforms
+- the rendered PDF stays visible as-is; collision platforms are invisible and aligned to the text
+- the square reader can move, use variable-height jumps, and drop through text platforms
+- the browser window acts as the player boundary while scrolling keeps the reader centered when possible
 
 ## Run Locally
 
@@ -21,10 +22,11 @@ Then open `http://localhost:8000`.
 ## Controls
 
 - `A` / `D` or left / right arrows: move
-- `W`, up arrow, or space: jump
+- space: jump
 - hold jump: jump higher, up to a limit
-- hold up while touching a screen edge: climb
+- down + jump: pass downward through text platforms until jump is released
+- use the `Keys` button to remap movement and jump inputs
 
 ## Notes
 
-This first version only reads page 1 of a PDF. The image-block detection is intentionally simple: it looks for large colored/dark clusters after masking out text platforms. The next useful steps are multi-page navigation, tuned collision grouping for diagrams, and proper reader sprites.
+This version renders all PDF pages into one scrollable document. Collision checks are focused around the current page and nearby pages so larger papers stay manageable. The next useful steps are better text-width fidelity, proper reader sprites, and page virtualization for very large PDFs.
