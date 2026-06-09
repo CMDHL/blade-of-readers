@@ -23,12 +23,12 @@
             <input id="pdfInput" type="file" accept="application/pdf,.pdf">
             Upload PDF
           </label>
-          <button id="controlsButton" type="button">Keys</button>
+          <button id="collisionButton" type="button" aria-pressed="false">Show Collisions</button>
           <button id="resetButton" type="button">Reset</button>
         </div>
       </header>
 
-      <section id="controlsPanel" class="controls-panel" hidden aria-label="Key mapping">
+      <section id="controlsPanel" class="controls-panel" aria-label="Key mapping">
         <div class="control-row">
           <span>Left</span>
           <button type="button" data-map-action="left"></button>
@@ -49,6 +49,10 @@
           <span>Jump</span>
           <button type="button" data-map-action="jump"></button>
         </div>
+        <div class="control-row">
+          <span>Dash</span>
+          <button type="button" data-map-action="dash"></button>
+        </div>
       </section>
 
       <section class="reader-stage" aria-label="PDF platformer">
@@ -59,7 +63,7 @@
         <div id="dropZone" class="drop-zone">
           <strong>Upload a PDF to generate the level</strong>
           <span>Words and punctuation-separated chunks become invisible platforms at the text itself.</span>
-          <span class="keys">Move: A/D or arrows · Jump: Space · Down + Jump: pass through text</span>
+          <span class="keys">Move: A/D or arrows · Jump: Space · Dash: Shift · Down + Jump: pass through text</span>
         </div>
       </section>
 

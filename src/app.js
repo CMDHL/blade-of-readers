@@ -6,8 +6,8 @@ const pdfDocument = document.querySelector("#pdfDocument");
 const playerSprite = document.querySelector("#playerSprite");
 const input = document.querySelector("#pdfInput");
 const resetButton = document.querySelector("#resetButton");
-const controlsButton = document.querySelector("#controlsButton");
 const controlsPanel = document.querySelector("#controlsPanel");
+const collisionButton = document.querySelector("#collisionButton");
 const dropZone = document.querySelector("#dropZone");
 const statusText = document.querySelector("#statusText");
 const pageText = document.querySelector("#pageText");
@@ -22,6 +22,7 @@ const keyMap = {
   up: ["ArrowUp", "KeyW"],
   down: ["ArrowDown", "KeyS"],
   jump: ["Space"],
+  dash: ["ShiftLeft", "ShiftRight"],
 };
 
 const world = {
@@ -29,6 +30,7 @@ const world = {
   cssHeight: 720,
   pages: [],
   platforms: [],
+  portals: [],
   loaded: false,
   renderWidth: 900,
   pageGap: 28,
@@ -49,6 +51,9 @@ const player = {
   jumpFrames: 0,
   dropThrough: false,
   coyote: 0,
+  dashFrames: 0,
+  dashDirection: 1,
+  dashCooldown: 0,
 };
 
 const config = {
@@ -62,10 +67,14 @@ const config = {
   jumpHoldForce: 0.32,
   maxJumpFrames: 12,
   platformMinWidth: 3,
+  dashDuration: 10,
+  dashDistance: 96,
+  dashSpeed: 9.6,
 };
 
 const keys = new Set();
 let remappingAction = null;
+let collisionsVisible = false;
 let lastManualScrollAt = -Infinity;
 let autoScrollLockedUntil = 0;
 let programmaticScroll = false;
@@ -109,6 +118,9 @@ function applyPhysicsScale() {
   config.jumpSpeed = 8.8 * config.scale;
   config.jumpHoldForce = 0.32 * config.scale;
   config.maxJumpFrames = Math.max(8, Math.round(12 * Math.sqrt(config.scale)));
+  config.dashDistance = 96 * config.scale;
+  config.dashDuration = Math.max(6, Math.round(10 * Math.sqrt(config.scale)));
+  config.dashSpeed = config.dashDistance / config.dashDuration;
 }
 
 function documentPageOffset() {
@@ -208,6 +220,8 @@ function resetPlayer() {
   player.jumpFrames = 0;
   player.dropThrough = false;
   player.coyote = 0;
+  player.dashFrames = 0;
+  player.dashCooldown = 0;
   autoScrollLockedUntil = performance.now() + 150;
   renderPlayer();
 }
@@ -244,6 +258,77 @@ function splitTextIntoPlatforms(item, viewport, pageOffsetY, pageNumber) {
   });
 }
 
+function buildWrapPortals() {
+  const portals = [];
+  const byPage = new Map();
+  for (const platform of world.platforms) {
+    if (!byPage.has(platform.page)) byPage.set(platform.page, []);
+    byPage.get(platform.page).push(platform);
+  }
+
+  for (const [pageNumber, platforms] of byPage) {
+    const lines = [];
+    for (const platform of [...platforms].sort((a, b) => a.y - b.y || a.x - b.x)) {
+      const line = lines.find((item) => Math.abs(item.y - platform.y) <= Math.max(3, platform.textHeight * 0.45));
+      if (line) {
+        line.platforms.push(platform);
+        line.y = (line.y + platform.y) / 2;
+      } else {
+        lines.push({ y: platform.y, platforms: [platform] });
+      }
+    }
+
+    lines.sort((a, b) => a.y - b.y);
+    for (let index = 0; index < lines.length - 1; index += 1) {
+      const fromLine = lines[index].platforms.sort((a, b) => a.x - b.x);
+      const toLine = lines[index + 1].platforms.sort((a, b) => a.x - b.x);
+      const from = fromLine.at(-1);
+      const to = toLine[0];
+      if (!from || !to) continue;
+
+      const portalHeight = from.textHeight;
+      portals.push({
+        x: from.x + from.width + Math.max(2, from.textHeight * 0.16),
+        y: from.y + from.height - portalHeight,
+        width: Math.max(4, from.textHeight * 0.55),
+        height: portalHeight,
+        page: pageNumber,
+        targetX: to.x,
+        targetY: to.y,
+        type: "portal",
+      });
+    }
+  }
+
+  world.portals = portals;
+}
+
+function renderCollisionLayer() {
+  pdfDocument.querySelector(".collision-layer")?.remove();
+  const layer = document.createElement("div");
+  layer.className = "collision-layer";
+
+  for (const platform of world.platforms) {
+    const shape = document.createElement("div");
+    shape.className = "collision-shape";
+    shape.style.transform = `translate(${platform.x}px, ${platform.y}px)`;
+    shape.style.width = `${platform.width}px`;
+    shape.style.height = `${platform.height}px`;
+    layer.append(shape);
+  }
+
+  for (const portal of world.portals) {
+    const shape = document.createElement("div");
+    shape.className = "wrap-portal";
+    shape.style.transform = `translate(${portal.x}px, ${portal.y}px)`;
+    shape.style.width = `${portal.width}px`;
+    shape.style.height = `${portal.height}px`;
+    layer.append(shape);
+  }
+
+  pdfDocument.insertBefore(layer, playerSprite);
+}
+
 function clearPdfDocument() {
   pdfDocument.replaceChildren();
   pdfDocument.append(playerSprite);
@@ -261,6 +346,7 @@ async function loadPdf(file) {
   world.renderWidth = availableWidth;
   world.pages = [];
   world.platforms = [];
+  world.portals = [];
   world.minTextHeight = Infinity;
   clearPdfDocument();
 
@@ -315,6 +401,8 @@ async function loadPdf(file) {
   world.minTextHeight = Number.isFinite(world.minTextHeight) ? world.minTextHeight : 16;
   world.loaded = true;
   applyPhysicsScale();
+  buildWrapPortals();
+  renderCollisionLayer();
   resetPlayer();
   playerSprite.hidden = false;
   dropZone.classList.add("is-hidden");
@@ -339,6 +427,18 @@ function activeCollisionPlatforms() {
   });
 }
 
+function activeWrapPortals() {
+  if (!world.loaded || performance.now() - lastManualScrollAt < 1000) return [];
+  const view = visibleWorldRect();
+  const page = world.pages.find((item) => item.y <= player.y + player.height && item.y + item.height >= player.y);
+  const activePage = page?.number || world.activePage;
+  return world.portals.filter((portal) => {
+    const nearPage = Math.abs(portal.page - activePage) <= 1;
+    const nearView = portal.y + portal.height >= view.top - 240 && portal.y <= view.bottom + 240;
+    return nearPage && nearView;
+  });
+}
+
 function startJump() {
   if (actionPressed("down") && (player.grounded || player.coyote > 0)) {
     player.dropThrough = true;
@@ -352,20 +452,37 @@ function startJump() {
     return;
   }
 
-  if (player.grounded || player.coyote > 0) {
-    player.vy = -config.jumpSpeed;
-    player.jumpHeld = true;
-    player.jumpFrames = 0;
-    player.grounded = false;
-    player.groundedByViewport = false;
-    player.coyote = 0;
-  }
+  player.vy = -config.jumpSpeed;
+  player.jumpHeld = true;
+  player.jumpFrames = 0;
+  player.grounded = false;
+  player.groundedByViewport = false;
+  player.coyote = 0;
+}
+
+function startDash() {
+  if (player.dashFrames > 0 || player.dashCooldown > 0) return;
+  const direction = actionPressed("left") && !actionPressed("right")
+    ? -1
+    : actionPressed("right") && !actionPressed("left")
+      ? 1
+      : player.dashDirection || 1;
+  player.dashDirection = direction;
+  player.dashFrames = config.dashDuration;
+  player.dashCooldown = config.dashDuration + 4;
+  player.vx = direction * config.dashSpeed;
+  player.vy = 0;
+  player.grounded = false;
+  player.groundedByViewport = false;
 }
 
 function collideWithPlatforms(previousY) {
   if (player.dropThrough) return;
+  const supportX = player.x + player.width / 2;
   for (const platform of activeCollisionPlatforms()) {
     if (!rectsOverlap(player, platform)) continue;
+    const centeredOnPlatform = supportX >= platform.x && supportX <= platform.x + platform.width;
+    if (!centeredOnPlatform) continue;
     const wasAbove = previousY + player.height <= platform.y + Math.max(2, platform.height * 0.5);
     if (player.vy >= 0 && wasAbove) {
       player.y = platform.y - player.height;
@@ -374,6 +491,23 @@ function collideWithPlatforms(previousY) {
       player.groundedByViewport = false;
     }
   }
+}
+
+function useWrapPortal(previousX) {
+  if (player.vx <= 0) return false;
+  for (const portal of activeWrapPortals()) {
+    const crossedDoor = previousX + player.width <= portal.x && player.x + player.width >= portal.x;
+    const verticallyAligned = player.y + player.height >= portal.y && player.y <= portal.y + portal.height;
+    if (!crossedDoor || !verticallyAligned) continue;
+    player.x = portal.targetX;
+    player.y = Math.max(0, portal.targetY - player.height);
+    player.vx = Math.min(config.moveSpeed, Math.max(1, player.vx));
+    player.vy = 0;
+    player.grounded = true;
+    player.groundedByViewport = false;
+    return true;
+  }
+  return false;
 }
 
 function updateActivePage() {
@@ -388,26 +522,39 @@ function updateActivePage() {
 function updatePlayer() {
   const movingLeft = actionPressed("left");
   const movingRight = actionPressed("right");
+  const isDashing = player.dashFrames > 0;
 
-  if (movingLeft) player.vx -= config.acceleration;
-  if (movingRight) player.vx += config.acceleration;
-  if (!movingLeft && !movingRight) player.vx *= config.friction;
-  player.vx = Math.max(-config.moveSpeed, Math.min(config.moveSpeed, player.vx));
+  if (isDashing) {
+    player.vx = player.dashDirection * config.dashSpeed;
+    player.vy = 0;
+    player.dashFrames -= 1;
+  } else {
+    if (movingLeft) player.vx -= config.acceleration;
+    if (movingRight) player.vx += config.acceleration;
+    if (!movingLeft && !movingRight) player.vx *= config.friction;
+    player.vx = Math.max(-config.moveSpeed, Math.min(config.moveSpeed, player.vx));
 
-  player.vy = Math.min(config.maxFall, player.vy + config.gravity);
-  if (player.jumpHeld && !player.dropThrough && player.vy < 0 && player.jumpFrames < config.maxJumpFrames) {
-    player.vy -= config.jumpHoldForce;
-    player.jumpFrames += 1;
+    player.vy = Math.min(config.maxFall, player.vy + config.gravity);
+    if (player.jumpHeld && !player.dropThrough && player.vy < 0 && player.jumpFrames < config.maxJumpFrames) {
+      player.vy -= config.jumpHoldForce;
+      player.jumpFrames += 1;
+    }
   }
 
+  player.dashCooldown = Math.max(0, player.dashCooldown - 1);
+
+  const previousX = player.x;
   player.x += player.vx;
   player.x = Math.max(0, Math.min(world.cssWidth - player.width, player.x));
+  const usedPortal = useWrapPortal(previousX);
 
   const wasGrounded = player.grounded;
   const previousY = player.y;
-  player.grounded = false;
-  player.groundedByViewport = false;
-  player.y += player.vy;
+  if (!usedPortal) {
+    player.grounded = false;
+    player.groundedByViewport = false;
+    player.y += player.vy;
+  }
   player.y = Math.max(0, Math.min(world.cssHeight - player.height, player.y));
   if (player.y + player.height >= world.cssHeight) {
     player.vy = 0;
@@ -430,6 +577,7 @@ function renderPlayer() {
   playerSprite.classList.toggle("is-grounded", player.grounded);
   playerSprite.classList.toggle("is-facing-right", player.vx >= 0);
   pdfDocument.classList.toggle("is-manual-scroll", performance.now() - lastManualScrollAt < 1000);
+  pdfDocument.classList.toggle("show-collisions", collisionsVisible);
 }
 
 function markManualScrollIntent() {
@@ -480,8 +628,11 @@ resetButton.addEventListener("click", () => {
   autoCenterPlayer();
 });
 
-controlsButton.addEventListener("click", () => {
-  controlsPanel.hidden = !controlsPanel.hidden;
+collisionButton.addEventListener("click", () => {
+  collisionsVisible = !collisionsVisible;
+  collisionButton.textContent = collisionsVisible ? "Hide Collisions" : "Show Collisions";
+  collisionButton.setAttribute("aria-pressed", String(collisionsVisible));
+  renderPlayer();
 });
 
 controlsPanel.addEventListener("click", (event) => {
@@ -506,6 +657,7 @@ window.addEventListener("keydown", (event) => {
   if (["PageDown", "PageUp", "Home", "End"].includes(event.code)) markManualScrollIntent();
   if (Object.values(keyMap).flat().includes(event.code)) event.preventDefault();
   if (!keys.has(event.code) && keyMap.jump.includes(event.code)) startJump();
+  if (!keys.has(event.code) && keyMap.dash.includes(event.code)) startDash();
   keys.add(event.code);
 });
 
