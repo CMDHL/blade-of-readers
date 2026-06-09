@@ -553,11 +553,12 @@ function splitTextIntoPlatforms(item, style, viewport, pageOffsetY, pageNumber) 
     const measuredSegment = segmentRects?.get(segment);
     const segmentX = x + (measuredSegment?.x ?? prefixWidth(segment.start));
     const segmentWidth = measuredSegment?.width ?? (prefixWidth(segment.end) - prefixWidth(segment.start));
+    const boundsY = y - fontHeight * 0.9;
     const platform = {
       x: segmentX,
-      y: y - fontHeight * 0.78,
+      y: boundsY,
       width: Math.max(config.platformMinWidth, segmentWidth),
-      height: Math.max(2, fontHeight * 0.2),
+      height: fontHeight * 1.08,
       textHeight: fontHeight,
       page: pageNumber,
       type: "text",
@@ -702,8 +703,8 @@ function renderSelectionLayer() {
     const paddingX = Math.max(1, textHeight * 0.07);
     const left = Math.min(...platforms.map((platform) => platform.x));
     const right = Math.max(...platforms.map((platform) => platform.x + platform.width));
-    const top = Math.min(...platforms.map((platform) => platform.y - (platform.textHeight || textHeight) * 0.12));
-    const bottom = Math.max(...platforms.map((platform) => platform.y + (platform.textHeight || textHeight) * 0.96));
+    const top = Math.min(...platforms.map((platform) => platform.y));
+    const bottom = Math.max(...platforms.map((platform) => platform.y + platform.height));
     const x = Math.max(0, left - paddingX);
     const width = Math.max(1, Math.min(world.cssWidth, right + paddingX) - x);
     const y = Math.max(0, top);
@@ -1079,7 +1080,8 @@ function collideWithPlatforms(previousY) {
     if (!rectsOverlap(player, platform)) continue;
     const centeredOnPlatform = supportX >= platform.x && supportX <= platform.x + platform.width;
     if (!centeredOnPlatform) continue;
-    const wasAbove = previousY + player.height <= platform.y + Math.max(2, platform.height * 0.5);
+    const topEdgeTolerance = Math.max(2, (platform.textHeight || world.minTextHeight) * 0.12);
+    const wasAbove = previousY + player.height <= platform.y + topEdgeTolerance;
     if (player.vy >= 0 && wasAbove) {
       player.y = platform.y - player.height;
       player.vy = 0;
