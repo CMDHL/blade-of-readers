@@ -606,11 +606,13 @@ function buildWrapPortals() {
 
       const portalHeight = from.textHeight;
       const portalWidth = Math.max(4, from.textHeight * 0.55);
-      const portalGap = Math.max(2, from.textHeight * 0.16);
+      const portalAttachOverlap = Math.max(1, from.textHeight * 0.05);
+      const fromEdge = from.x + from.width;
+      const toEdge = to.x;
       portals.push({
-        x: from.x + from.width + portalGap,
+        x: fromEdge - portalAttachOverlap,
         y: from.y + from.height - portalHeight,
-        width: portalWidth,
+        width: portalWidth + portalAttachOverlap,
         height: portalHeight,
         page: pageNumber,
         direction: 1,
@@ -618,12 +620,13 @@ function buildWrapPortals() {
         targetPlatform: to,
         targetX: to.x,
         targetY: to.y,
+        triggerX: fromEdge,
         type: "portal",
       });
       portals.push({
-        x: to.x - portalGap - portalWidth,
+        x: toEdge - portalWidth,
         y: to.y + to.height - portalHeight,
-        width: portalWidth,
+        width: portalWidth + portalAttachOverlap,
         height: portalHeight,
         page: pageNumber,
         direction: -1,
@@ -631,6 +634,7 @@ function buildWrapPortals() {
         targetPlatform: from,
         targetX: from.x + from.width - player.width,
         targetY: from.y,
+        triggerX: toEdge,
         type: "portal",
       });
     }
@@ -1101,12 +1105,15 @@ function useWrapPortal(previousX) {
   for (const portal of activeWrapPortals()) {
     if (Math.sign(player.vx) !== portal.direction) continue;
     if (!playerSupportedByPlatform(portal.sourcePlatform)) continue;
-    const portalEdge = portal.direction > 0 ? portal.x : portal.x + portal.width;
+    const portalEdge = portal.triggerX ?? (portal.direction > 0 ? portal.x : portal.x + portal.width);
     const crossedDoor = portal.direction > 0
       ? previousX + player.width <= portalEdge && player.x + player.width >= portalEdge
       : previousX >= portalEdge && player.x <= portalEdge;
+    const reachedDoor = portal.direction > 0
+      ? player.x + player.width >= portalEdge
+      : player.x <= portalEdge;
     const verticallyAligned = player.y + player.height >= portal.y && player.y <= portal.y + portal.height;
-    if (!crossedDoor || !verticallyAligned) continue;
+    if ((!crossedDoor && !reachedDoor) || !verticallyAligned) continue;
     player.x = portal.targetX;
     player.y = Math.max(0, portal.targetY - player.height);
     player.vx = portal.direction * Math.min(config.moveSpeed, Math.max(1, Math.abs(player.vx)));
