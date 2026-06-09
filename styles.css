@@ -176,10 +176,6 @@ button:hover {
   min-height: min(76vh, 860px);
 }
 
-.pdf-document.is-manual-scroll .pdf-page {
-  opacity: 0.5;
-}
-
 .pdf-page {
   display: block;
   background: #fff;

@@ -74,11 +74,9 @@ const config = {
 
 const keys = new Set();
 let remappingAction = null;
-let collisionsVisible = false;
-let lastManualScrollAt = -Infinity;
-let autoScrollLockedUntil = 0;
-let programmaticScroll = false;
-let ignoreScrollUntil = 0;
+let collisionsVisible = true;
+let autoScrollEnabled = true;
+let programmaticScrollUntil = 0;
 
 playerSprite.hidden = true;
 
@@ -189,23 +187,19 @@ function keepPlayerInVisibleWindow() {
 }
 
 function autoCenterPlayer() {
-  if (!world.loaded || performance.now() < autoScrollLockedUntil) return;
+  if (!world.loaded || !autoScrollEnabled) return;
   const offset = documentPageOffset();
   const viewport = viewportPageRect();
   const targetX = offset.left + player.x + player.width / 2 - viewport.width / 2;
   const targetY = player.groundedByViewport
     ? viewport.top
     : offset.top + player.y + player.height / 2 - viewport.height / 2;
-  programmaticScroll = true;
-  ignoreScrollUntil = performance.now() + 350;
+  programmaticScrollUntil = performance.now() + 150;
   window.scrollTo({
     left: Math.max(0, targetX),
     top: Math.max(0, targetY),
     behavior: "instant",
   });
-  window.setTimeout(() => {
-    programmaticScroll = false;
-  }, 350);
 }
 
 function resetPlayer() {
@@ -222,7 +216,7 @@ function resetPlayer() {
   player.coyote = 0;
   player.dashFrames = 0;
   player.dashCooldown = 0;
-  autoScrollLockedUntil = performance.now() + 150;
+  autoScrollEnabled = true;
   renderPlayer();
 }
 
@@ -416,26 +410,28 @@ function rectsOverlap(a, b) {
 }
 
 function activeCollisionPlatforms() {
-  if (!world.loaded || performance.now() - lastManualScrollAt < 1000) return [];
-  const view = visibleWorldRect();
+  if (!world.loaded) return [];
   const page = world.pages.find((item) => item.y <= player.y + player.height && item.y + item.height >= player.y);
   const activePage = page?.number || world.activePage;
+  const playerTop = player.y - 240;
+  const playerBottom = player.y + player.height + 240;
   return world.platforms.filter((platform) => {
     const nearPage = Math.abs(platform.page - activePage) <= 1;
-    const nearView = platform.y + platform.height >= view.top - 240 && platform.y <= view.bottom + 240;
-    return nearPage && nearView;
+    const nearPlayer = platform.y + platform.height >= playerTop && platform.y <= playerBottom;
+    return nearPage && nearPlayer;
   });
 }
 
 function activeWrapPortals() {
-  if (!world.loaded || performance.now() - lastManualScrollAt < 1000) return [];
-  const view = visibleWorldRect();
+  if (!world.loaded) return [];
   const page = world.pages.find((item) => item.y <= player.y + player.height && item.y + item.height >= player.y);
   const activePage = page?.number || world.activePage;
+  const playerTop = player.y - 240;
+  const playerBottom = player.y + player.height + 240;
   return world.portals.filter((portal) => {
     const nearPage = Math.abs(portal.page - activePage) <= 1;
-    const nearView = portal.y + portal.height >= view.top - 240 && portal.y <= view.bottom + 240;
-    return nearPage && nearView;
+    const nearPlayer = portal.y + portal.height >= playerTop && portal.y <= playerBottom;
+    return nearPage && nearPlayer;
   });
 }
 
@@ -565,7 +561,7 @@ function updatePlayer() {
   player.coyote = player.grounded ? 8 : Math.max(0, player.coyote - 1);
   if (wasGrounded && !player.grounded) player.coyote = 8;
 
-  keepPlayerInVisibleWindow();
+  if (autoScrollEnabled) keepPlayerInVisibleWindow();
   updateActivePage();
   autoCenterPlayer();
 }
@@ -576,14 +572,41 @@ function renderPlayer() {
   playerSprite.style.transform = `translate(${player.x}px, ${player.y}px)`;
   playerSprite.classList.toggle("is-grounded", player.grounded);
   playerSprite.classList.toggle("is-facing-right", player.vx >= 0);
-  pdfDocument.classList.toggle("is-manual-scroll", performance.now() - lastManualScrollAt < 1000);
   pdfDocument.classList.toggle("show-collisions", collisionsVisible);
 }
 
 function markManualScrollIntent() {
   if (!world.loaded) return;
-  lastManualScrollAt = performance.now();
-  autoScrollLockedUntil = lastManualScrollAt + 1000;
+  autoScrollEnabled = false;
+}
+
+function restartAutoScroll() {
+  if (!world.loaded) return;
+  autoScrollEnabled = true;
+  autoCenterPlayer();
+}
+
+function teleportPlayerToClick(event) {
+  if (!world.loaded || event.button !== 0) return;
+  const offset = documentPageOffset();
+  const viewport = viewportPageRect();
+  player.x = event.clientX + viewport.left - offset.left - player.width / 2;
+  player.y = event.clientY + viewport.top - offset.top - player.height / 2;
+  player.x = Math.max(0, Math.min(world.cssWidth - player.width, player.x));
+  player.y = Math.max(0, Math.min(world.cssHeight - player.height, player.y));
+  player.vx = 0;
+  player.vy = 0;
+  player.grounded = false;
+  player.groundedByViewport = false;
+  player.jumpHeld = false;
+  player.jumpFrames = 0;
+  player.dropThrough = false;
+  player.coyote = 0;
+  player.dashFrames = 0;
+  player.dashCooldown = 0;
+  restartAutoScroll();
+  updateActivePage();
+  renderPlayer();
 }
 
 function tick() {
@@ -654,8 +677,12 @@ window.addEventListener("keydown", (event) => {
     return;
   }
 
+  const isControlKey = Object.values(keyMap).flat().includes(event.code);
   if (["PageDown", "PageUp", "Home", "End"].includes(event.code)) markManualScrollIntent();
-  if (Object.values(keyMap).flat().includes(event.code)) event.preventDefault();
+  if (isControlKey) {
+    event.preventDefault();
+    restartAutoScroll();
+  }
   if (!keys.has(event.code) && keyMap.jump.includes(event.code)) startJump();
   if (!keys.has(event.code) && keyMap.dash.includes(event.code)) startDash();
   keys.add(event.code);
@@ -671,9 +698,8 @@ window.addEventListener("keyup", (event) => {
 });
 
 window.addEventListener("scroll", () => {
-  if (programmaticScroll || performance.now() < ignoreScrollUntil) return;
+  if (performance.now() < programmaticScrollUntil) return;
   markManualScrollIntent();
-  if (world.loaded) keepPlayerInVisibleWindow();
 }, { passive: true });
 
 window.addEventListener("resize", () => {
@@ -683,6 +709,7 @@ window.addEventListener("resize", () => {
 
 window.addEventListener("wheel", markManualScrollIntent, { passive: true });
 window.addEventListener("touchmove", markManualScrollIntent, { passive: true });
+window.addEventListener("pointerdown", teleportPlayerToClick);
 
 if (window.visualViewport) {
   window.visualViewport.addEventListener("resize", () => {
@@ -690,9 +717,8 @@ if (window.visualViewport) {
     keepPlayerInVisibleWindow();
   });
   window.visualViewport.addEventListener("scroll", () => {
-    if (programmaticScroll || performance.now() < ignoreScrollUntil) return;
+    if (performance.now() < programmaticScrollUntil) return;
     markManualScrollIntent();
-    if (world.loaded) keepPlayerInVisibleWindow();
   });
 }
 
