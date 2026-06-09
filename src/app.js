@@ -28,10 +28,12 @@ const keyMap = {
   down: ["ArrowDown", "KeyS"],
   jump: ["Space", "KeyZ"],
   dash: ["ShiftLeft", "ShiftRight", "KeyC"],
+  attack: ["KeyX"],
 };
 
 const controllerMap = {
   jump: [0],
+  attack: [2],
   dash: [7],
 };
 
@@ -86,6 +88,7 @@ const player = {
   dashFrames: 0,
   dashDirection: 1,
   dashCooldown: 0,
+  facingDirection: 1,
 };
 
 const config = {
@@ -102,6 +105,7 @@ const config = {
   dashDuration: 10,
   dashDistance: 96,
   dashSpeed: 9.6,
+  bladeDurationMs: 150,
 };
 
 const keys = new Set();
@@ -122,6 +126,11 @@ let programmaticScrollUntil = 0;
 let currentLanguage = "en";
 let currentStatus = { key: "waiting", values: {} };
 let currentPageText = { page: 1, total: null };
+const textSelection = {
+  anchorPlatform: null,
+  startIndex: null,
+  endIndex: null,
+};
 
 const translations = {
   en: {
@@ -143,10 +152,11 @@ const translations = {
     down: "Down",
     jump: "Jump",
     dash: "Dash",
+    attack: "Attack",
     readerStageLabel: "PDF platformer",
     dropTitle: "Upload a PDF to generate the level",
     dropDescription: "Words and punctuation-separated chunks become invisible platforms at the text itself.",
-    keysHelp: "Move with keys or left stick. Jump: Space / A. Dash: Shift / RT. Mouse click teleports.",
+    keysHelp: "Move with keys or left stick. Jump: Space / A. Attack: X. Dash: Shift / RT. Mouse click teleports.",
     loadingTitle: "Loading PDF...",
     loadingDescription: "Preparing the level before switching views.",
     waiting: "Waiting for a PDF.",
@@ -180,10 +190,11 @@ const translations = {
     down: "下",
     jump: "跳跃",
     dash: "冲刺",
+    attack: "攻击",
     readerStageLabel: "PDF 平台关卡",
     dropTitle: "上传 PDF 生成关卡",
     dropDescription: "单词和由标点分隔的文本片段会在原文位置变成隐形平台。",
-    keysHelp: "按键或左摇杆移动。跳跃：空格 / A。冲刺：Shift / RT。鼠标点击可传送。",
+    keysHelp: "按键或左摇杆移动。跳跃：空格 / A。攻击：X。冲刺：Shift / RT。鼠标点击可传送。",
     loadingTitle: "正在加载 PDF...",
     loadingDescription: "正在准备关卡，完成后会切换显示。",
     waiting: "等待上传 PDF。",
@@ -414,6 +425,7 @@ function resetPlayer() {
   player.coyote = 0;
   player.dashFrames = 0;
   player.dashCooldown = 0;
+  player.facingDirection = 1;
   autoScrollEnabled = true;
   renderPlayer();
 }
@@ -577,8 +589,11 @@ function buildWrapPortals() {
     lines.sort((a, b) => a.y - b.y);
     lines.forEach((line, index) => {
       const lineId = `${pageNumber}:${index}`;
-      for (const platform of line.platforms) {
+      line.platforms.sort((a, b) => a.x - b.x);
+      for (const [wordIndex, platform] of line.platforms.entries()) {
         platform.lineId = lineId;
+        platform.lineOrder = index;
+        platform.lineWordOrder = wordIndex;
       }
     });
 
@@ -622,6 +637,184 @@ function buildWrapPortals() {
   }
 
   world.portals = portals;
+}
+
+function assignPlatformReadingOrder() {
+  [...world.platforms]
+    .sort((a, b) => (
+      a.page - b.page
+      || (a.lineOrder ?? 0) - (b.lineOrder ?? 0)
+      || (a.lineWordOrder ?? 0) - (b.lineWordOrder ?? 0)
+      || a.x - b.x
+    ))
+    .forEach((platform, index) => {
+      platform.readingIndex = index;
+    });
+}
+
+function clearTextSelection({ render = true } = {}) {
+  textSelection.anchorPlatform = null;
+  textSelection.startIndex = null;
+  textSelection.endIndex = null;
+  if (render) renderSelectionLayer();
+}
+
+function renderSelectionLayer() {
+  pdfDocument.querySelector(".selection-layer")?.remove();
+  if (!world.loaded || textSelection.startIndex === null || textSelection.endIndex === null) return;
+
+  const startIndex = Math.min(textSelection.startIndex, textSelection.endIndex);
+  const endIndex = Math.max(textSelection.startIndex, textSelection.endIndex);
+  const selectedPlatforms = world.platforms.filter((platform) => (
+    Number.isFinite(platform.readingIndex)
+    && platform.readingIndex >= startIndex
+    && platform.readingIndex <= endIndex
+  ));
+  if (!selectedPlatforms.length) return;
+
+  const layer = document.createElement("div");
+  layer.className = "selection-layer";
+  const lines = new Map();
+
+  for (const platform of selectedPlatforms) {
+    const key = `${platform.page}:${platform.lineOrder ?? platform.lineId ?? platform.readingIndex}`;
+    if (!lines.has(key)) {
+      lines.set(key, {
+        page: platform.page,
+        lineOrder: platform.lineOrder ?? 0,
+        platforms: [],
+      });
+    }
+    lines.get(key).platforms.push(platform);
+  }
+
+  const lineGroups = [...lines.values()].sort((a, b) => (
+    a.page - b.page || a.lineOrder - b.lineOrder
+  ));
+
+  for (const group of lineGroups) {
+    const platforms = group.platforms.sort((a, b) => a.x - b.x);
+    const textHeight = Math.max(...platforms.map((platform) => platform.textHeight || world.minTextHeight));
+    const paddingX = Math.max(1, textHeight * 0.07);
+    const left = Math.min(...platforms.map((platform) => platform.x));
+    const right = Math.max(...platforms.map((platform) => platform.x + platform.width));
+    const top = Math.min(...platforms.map((platform) => platform.y - (platform.textHeight || textHeight) * 0.12));
+    const bottom = Math.max(...platforms.map((platform) => platform.y + (platform.textHeight || textHeight) * 0.96));
+    const x = Math.max(0, left - paddingX);
+    const width = Math.max(1, Math.min(world.cssWidth, right + paddingX) - x);
+    const y = Math.max(0, top);
+    const height = Math.max(2, bottom - y);
+    const highlight = document.createElement("div");
+    highlight.className = "selection-highlight";
+    highlight.style.transform = `translate(${x}px, ${y}px)`;
+    highlight.style.width = `${width}px`;
+    highlight.style.height = `${height}px`;
+    layer.append(highlight);
+  }
+
+  const collisionLayer = pdfDocument.querySelector(".collision-layer");
+  pdfDocument.insertBefore(layer, collisionLayer || playerSprite);
+}
+
+function updateTextSelection(platform) {
+  if (!platform || !Number.isFinite(platform.readingIndex)) return;
+
+  if (textSelection.anchorPlatform) {
+    textSelection.startIndex = textSelection.anchorPlatform.readingIndex;
+    textSelection.endIndex = platform.readingIndex;
+    textSelection.anchorPlatform = null;
+  } else {
+    textSelection.anchorPlatform = platform;
+    textSelection.startIndex = platform.readingIndex;
+    textSelection.endIndex = platform.readingIndex;
+  }
+
+  renderSelectionLayer();
+}
+
+function attackDirection() {
+  const wantsUp = actionPressed("up") && !actionPressed("down");
+  const wantsDown = actionPressed("down") && !actionPressed("up");
+  const wantsLeft = actionPressed("left") && !actionPressed("right");
+  const wantsRight = actionPressed("right") && !actionPressed("left");
+
+  if (wantsUp) return { name: "up", x: 0, y: -1 };
+  if (wantsDown) return { name: "down", x: 0, y: 1 };
+  if (wantsLeft) return { name: "left", x: -1, y: 0 };
+  if (wantsRight) return { name: "right", x: 1, y: 0 };
+  return player.facingDirection < 0
+    ? { name: "left", x: -1, y: 0 }
+    : { name: "right", x: 1, y: 0 };
+}
+
+function bladeHitbox(direction) {
+  const length = Math.max(36, world.minTextHeight * 3.2, player.width * 3.4);
+  const thickness = Math.max(8, world.minTextHeight * 0.8, player.height * 0.8);
+  const gap = Math.max(2, world.minTextHeight * 0.12);
+  const centerX = player.x + player.width / 2;
+  const centerY = player.y + player.height / 2;
+
+  if (direction.x > 0) {
+    return {
+      x: player.x + player.width + gap,
+      y: centerY - thickness / 2,
+      width: length,
+      height: thickness,
+    };
+  }
+  if (direction.x < 0) {
+    return {
+      x: player.x - gap - length,
+      y: centerY - thickness / 2,
+      width: length,
+      height: thickness,
+    };
+  }
+  if (direction.y < 0) {
+    return {
+      x: centerX - thickness / 2,
+      y: player.y - gap - length,
+      width: thickness,
+      height: length,
+    };
+  }
+  return {
+    x: centerX - thickness / 2,
+    y: player.y + player.height + gap,
+    width: thickness,
+    height: length,
+  };
+}
+
+function distanceSquaredToRect(point, rect) {
+  const closestX = Math.max(rect.x, Math.min(point.x, rect.x + rect.width));
+  const closestY = Math.max(rect.y, Math.min(point.y, rect.y + rect.height));
+  return (point.x - closestX) ** 2 + (point.y - closestY) ** 2;
+}
+
+function closestBladeHit(hitbox) {
+  const playerCenter = {
+    x: player.x + player.width / 2,
+    y: player.y + player.height / 2,
+  };
+
+  return activeCollisionPlatforms()
+    .filter((platform) => rectsOverlap(hitbox, platform))
+    .sort((a, b) => (
+      distanceSquaredToRect(playerCenter, a) - distanceSquaredToRect(playerCenter, b)
+      || (a.readingIndex ?? 0) - (b.readingIndex ?? 0)
+    ))[0] || null;
+}
+
+function showBlade(hitbox, direction) {
+  pdfDocument.querySelector(".blade-swing")?.remove();
+  const blade = document.createElement("div");
+  blade.className = `blade-swing blade-swing-${direction.name}`;
+  blade.style.transform = `translate(${hitbox.x}px, ${hitbox.y}px)`;
+  blade.style.width = `${hitbox.width}px`;
+  blade.style.height = `${hitbox.height}px`;
+  pdfDocument.append(blade);
+  window.setTimeout(() => blade.remove(), config.bladeDurationMs);
 }
 
 function activeLineMarkerBounds(lineId) {
@@ -705,6 +898,7 @@ async function loadPdf(file) {
   world.loaded = false;
   playerSprite.hidden = true;
   dropZone.classList.add("is-hidden");
+  clearTextSelection({ render: false });
   clearPdfDocument();
   setLoadingPdf(true);
   setStatus("readingPdf");
@@ -776,7 +970,9 @@ async function loadPdf(file) {
   world.loaded = true;
   applyPhysicsScale();
   buildWrapPortals();
+  assignPlatformReadingOrder();
   renderCollisionLayer();
+  renderSelectionLayer();
   resetPlayer();
   setLoadingPdf(false);
   playerSprite.hidden = false;
@@ -848,12 +1044,28 @@ function startDash() {
       ? 1
       : player.dashDirection || 1;
   player.dashDirection = direction;
+  player.facingDirection = direction;
   player.dashFrames = config.dashDuration;
   player.dashCooldown = config.dashDuration + 4;
   player.vx = direction * config.dashSpeed;
   player.vy = 0;
   player.grounded = false;
   player.groundedByViewport = false;
+}
+
+function startAttack() {
+  if (!world.loaded) return;
+  const direction = attackDirection();
+  if (direction.x !== 0) player.facingDirection = direction.x;
+  const hitbox = bladeHitbox(direction);
+  showBlade(hitbox, direction);
+  const hitPlatform = closestBladeHit(hitbox);
+  if (hitPlatform) {
+    updateTextSelection(hitPlatform);
+  } else {
+    clearTextSelection();
+  }
+  renderPlayer();
 }
 
 function collideWithPlatforms(previousY) {
@@ -921,6 +1133,9 @@ function updatePlayer() {
   const movingRight = actionPressed("right");
   const isDashing = player.dashFrames > 0;
 
+  if (movingLeft && !movingRight) player.facingDirection = -1;
+  if (movingRight && !movingLeft) player.facingDirection = 1;
+
   if (isDashing) {
     player.vx = player.dashDirection * config.dashSpeed;
     player.vy = 0;
@@ -972,7 +1187,7 @@ function renderPlayer() {
   playerSprite.style.height = `${player.height}px`;
   playerSprite.style.transform = `translate(${player.x}px, ${player.y}px)`;
   playerSprite.classList.toggle("is-grounded", player.grounded);
-  playerSprite.classList.toggle("is-facing-right", player.vx >= 0);
+  playerSprite.classList.toggle("is-facing-right", player.facingDirection >= 0);
   pdfDocument.classList.toggle("show-collisions", collisionsVisible);
   if (world.renderedActivePlatformLineId === world.activePlatformLineId) return;
   for (const shape of pdfDocument.querySelectorAll(".collision-shape")) {
@@ -1070,6 +1285,8 @@ function updateControllerInput() {
   } else {
     const jumpPressed = controllerMap.jump.some((button) => controllerButtons.has(button));
     const jumpWasPressed = controllerMap.jump.some((button) => previousControllerButtons.has(button));
+    const attackPressed = controllerMap.attack.some((button) => controllerButtons.has(button));
+    const attackWasPressed = controllerMap.attack.some((button) => previousControllerButtons.has(button));
     const dashPressed = controllerMap.dash.some((button) => controllerButtons.has(button));
     const dashWasPressed = controllerMap.dash.some((button) => previousControllerButtons.has(button));
 
@@ -1080,6 +1297,10 @@ function updateControllerInput() {
     if (dashPressed && !dashWasPressed) {
       restartAutoScroll();
       startDash();
+    }
+    if (attackPressed && !attackWasPressed) {
+      restartAutoScroll();
+      startAttack();
     }
     if (!jumpPressed && jumpWasPressed) {
       player.jumpHeld = false;
@@ -1134,6 +1355,7 @@ dropZone.addEventListener("drop", async (event) => {
 });
 
 resetButton.addEventListener("click", () => {
+  clearTextSelection();
   resetPlayer();
   autoCenterPlayer();
 });
@@ -1182,6 +1404,7 @@ window.addEventListener("keydown", (event) => {
   }
   if (!keys.has(event.code) && keyMap.jump.includes(event.code)) startJump();
   if (!keys.has(event.code) && keyMap.dash.includes(event.code)) startDash();
+  if (!keys.has(event.code) && keyMap.attack.includes(event.code)) startAttack();
   keys.add(event.code);
 });
 

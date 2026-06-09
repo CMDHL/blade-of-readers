@@ -274,6 +274,20 @@ button:hover {
   pointer-events: none;
 }
 
+.selection-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  mix-blend-mode: multiply;
+}
+
+.selection-highlight {
+  position: absolute;
+  border-radius: 2px;
+  background: rgba(0, 95, 255, 0.32);
+}
+
 .collision-shape,
 .wrap-portal {
   position: absolute;
@@ -317,6 +331,34 @@ button:hover {
 
 .player-sprite.is-grounded {
   background: #19766f;
+}
+
+.blade-swing {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 4;
+  border: 1px solid #17191f;
+  border-radius: 2px;
+  background: #fff;
+  box-shadow: 1px 1px 0 rgba(23, 25, 31, 0.22);
+  pointer-events: none;
+  transform-origin: center;
+  animation: blade-pop 150ms ease-out forwards;
+}
+
+@keyframes blade-pop {
+  0% {
+    opacity: 0;
+  }
+
+  35% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
 }
 
 .player-sprite span {
