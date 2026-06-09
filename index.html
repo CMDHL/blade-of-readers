@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Blade of Readers</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="src/app.js" type="module"></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div>
+            <h1>Blade of Readers</h1>
+            <p>Turn paper pages into tiny platformer levels.</p>
+          </div>
+        </div>
+
+        <div class="actions">
+          <label class="upload-button">
+            <input id="pdfInput" type="file" accept="application/pdf,.pdf">
+            Upload PDF
+          </label>
+          <button id="resetButton" type="button">Reset</button>
+        </div>
+      </header>
+
+      <section class="reader-stage" aria-label="PDF platformer">
+        <canvas id="gameCanvas" width="1280" height="720"></canvas>
+        <div id="dropZone" class="drop-zone">
+          <strong>Upload a PDF to generate the level</strong>
+          <span>Words and punctuation-separated chunks become platforms. Large figures become blocks.</span>
+          <span class="keys">Move: A/D or arrows · Jump: W, Up, or Space · Hold jump for height</span>
+        </div>
+      </section>
+
+      <footer class="statusbar">
+        <span id="statusText">Waiting for a PDF.</span>
+        <span id="pageText">Page 1</span>
+      </footer>
+    </main>
+  </body>
+</html>
