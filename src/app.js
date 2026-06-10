@@ -1337,6 +1337,12 @@ function pdfNumberArray(pdfDoc, values) {
   return array;
 }
 
+function finiteNumberValues(values, expectedLength = 0) {
+  return Array.isArray(values)
+    && values.length >= expectedLength
+    && values.every((value) => Number.isFinite(value));
+}
+
 function pdfDateString(date = new Date()) {
   const pad = (value) => String(value).padStart(2, "0");
   return [
@@ -1352,10 +1358,11 @@ function pdfDateString(date = new Date()) {
 }
 
 function pageAnnotationArray(pdfDoc, page) {
-  let annots = page.node.lookup(PDFName.of("Annots"), PDFArray);
+  const annotsName = PDFName.of("Annots");
+  let annots = page.node.lookupMaybe?.(annotsName, PDFArray);
   if (!annots) {
     annots = PDFArray.withContext(pdfDoc.context);
-    page.node.set(PDFName.of("Annots"), annots);
+    page.node.set(annotsName, annots);
   }
   return annots;
 }
@@ -1384,7 +1391,14 @@ function nearlyEqualNumberArray(a = [], b = [], tolerance = 0.75) {
 }
 
 function pdfAnnotationMatchesRemoval(pdfDoc, annotRef, removal) {
-  const annot = pdfDoc.context.lookup(annotRef);
+  let annot = annotRef;
+  try {
+    annot = pdfDoc.context.lookup(annotRef);
+  } catch (error) {
+    console.warn("Could not inspect PDF annotation for removal.", error);
+  }
+  if (!annot?.lookup) return false;
+
   const subtype = annot?.lookup?.(PDFName.of("Subtype"));
   if (!String(subtype).includes("Highlight")) return false;
 
@@ -1410,7 +1424,7 @@ function removePdfAnnotations(pdfDoc) {
     const removals = removalsByPage.get(pageIndex + 1);
     if (!removals?.length) return;
 
-    const annots = page.node.lookup(PDFName.of("Annots"), PDFArray);
+    const annots = page.node.lookupMaybe?.(PDFName.of("Annots"), PDFArray);
     if (!annots) return;
 
     for (let index = annots.size() - 1; index >= 0; index -= 1) {
@@ -1444,6 +1458,23 @@ function worldRectToPdfQuad(page, rect) {
     ],
     quadPoints: points.flat(),
   };
+}
+
+function isWritableAnnotationRect(rect) {
+  return rect
+    && Number.isInteger(rect.page)
+    && rect.page > 0
+    && Number.isFinite(rect.x)
+    && Number.isFinite(rect.y)
+    && Number.isFinite(rect.width)
+    && Number.isFinite(rect.height)
+    && rect.width > 0
+    && rect.height > 0;
+}
+
+function isWritablePdfQuad(quad) {
+  return finiteNumberValues(quad?.rect, 4)
+    && finiteNumberValues(quad?.quadPoints, 8);
 }
 
 function addPdfHighlightAnnotation(pdfDoc, page, annotation) {
@@ -1503,6 +1534,7 @@ async function annotatedPdfBytes() {
   for (const annotation of sessionAnnotations) {
     const rectsByPage = new Map();
     for (const rect of annotation.rects || []) {
+      if (!isWritableAnnotationRect(rect)) continue;
       if (!rectsByPage.has(rect.page)) rectsByPage.set(rect.page, []);
       rectsByPage.get(rect.page).push(rect);
     }
@@ -1512,7 +1544,11 @@ async function annotatedPdfBytes() {
       const pdfPage = pdfPages[pageNumber - 1];
       if (!pageInfo || !pdfPage) continue;
 
-      const quads = rects.map((rect) => worldRectToPdfQuad(pageInfo, rect));
+      const quads = rects
+        .map((rect) => worldRectToPdfQuad(pageInfo, rect))
+        .filter(isWritablePdfQuad);
+      if (!quads.length) continue;
+
       const annotationRect = [
         Math.min(...quads.map((quad) => quad.rect[0])),
         Math.min(...quads.map((quad) => quad.rect[1])),

@@ -307,12 +307,14 @@ button:disabled {
 }
 
 .annotation-list {
+  width: 100%;
   min-height: 0;
-  display: grid;
-  align-content: start;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
   padding: 10px;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .annotation-empty {
@@ -323,7 +325,9 @@ button:disabled {
 
 .annotation-entry {
   width: 100%;
-  min-height: 0;
+  min-width: 0;
+  min-height: auto;
+  flex: 0 0 auto;
   grid-template-columns: minmax(0, 1fr);
   display: grid;
   gap: 5px;
@@ -332,6 +336,7 @@ button:disabled {
   align-items: start;
   padding: 10px;
   border-radius: 6px;
+  overflow: hidden;
   text-align: left;
   white-space: normal;
 }
@@ -344,20 +349,25 @@ button:disabled {
 
 .annotation-entry-meta {
   width: 100%;
+  min-width: 0;
   color: var(--muted);
   font-size: 0.72rem;
   font-weight: 800;
   text-align: left;
   text-transform: uppercase;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .annotation-entry-body {
   width: 100%;
+  min-width: 0;
   color: var(--ink);
   font-size: 0.88rem;
   line-height: 1.35;
   text-align: left;
   overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .reader-stage {
