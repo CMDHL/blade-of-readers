@@ -1,7 +1,7 @@
 # 读者之刃 | Blade of Readers
 https://cmdhl.github.io/blade-of-readers/
 
-把晦涩的文章变成简单的平台跳跃游戏。\
+把晦涩的文章变成简单的平台跳跃游戏。（如果看论文能像打游戏那么专注就好啦）\
 Convert complicated articles into simple platformer levels.
 
 (该项目代码由AI生成)\
