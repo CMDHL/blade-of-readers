@@ -650,7 +650,7 @@ function measureTextSegmentRects(text, segments, fontHeight, style, totalTextWid
   return rects;
 }
 
-function splitTextIntoPlatforms(item, style, viewport, pageOffsetY, pageNumber, textItemId) {
+function splitTextIntoPlatforms(item, style, viewport, pageOffsetY, pageNumber, textItemId, textItemOrder, textLineOrder) {
   const text = item.str || "";
   const segments = textSegments(text);
   if (!segments.some((segment) => !segment.isSeparator)) return [];
@@ -677,7 +677,7 @@ function splitTextIntoPlatforms(item, style, viewport, pageOffsetY, pageNumber, 
     return prefixWidths.get(index);
   };
 
-  return segments.flatMap((segment) => {
+  return segments.flatMap((segment, segmentOrder) => {
     if (segment.isSeparator) return [];
     const measuredSegment = segmentRects?.get(segment);
     const segmentX = x + (measuredSegment?.x ?? prefixWidth(segment.start));
@@ -694,11 +694,59 @@ function splitTextIntoPlatforms(item, style, viewport, pageOffsetY, pageNumber, 
       textStart: segment.start,
       textEnd: segment.end,
       textItemId,
+      textItemOrder,
+      textSegmentOrder: segmentOrder,
+      textLineOrder,
       page: pageNumber,
       type: "text",
     };
     return [platform];
   });
+}
+
+function platformsInTextOrder(platforms) {
+  return [...platforms].sort((a, b) => (
+    (a.textItemOrder ?? 0) - (b.textItemOrder ?? 0)
+    || (a.textSegmentOrder ?? 0) - (b.textSegmentOrder ?? 0)
+    || a.y - b.y
+    || a.x - b.x
+  ));
+}
+
+function platformTextHeight(platforms) {
+  const heights = platforms.map((platform) => platform.textHeight).filter(Number.isFinite);
+  return heights.length ? Math.max(...heights) : world.minTextHeight || 16;
+}
+
+function lineFromPlatforms(pageNumber, platforms, lineOrder) {
+  const left = Math.min(...platforms.map((platform) => platform.x));
+  const right = Math.max(...platforms.map((platform) => platform.x + platform.width));
+  const top = Math.min(...platforms.map((platform) => platform.y));
+  const bottom = Math.max(...platforms.map((platform) => platform.y + platform.height));
+  return {
+    page: pageNumber,
+    x: left,
+    y: top,
+    right,
+    width: right - left,
+    height: bottom - top,
+    textHeight: platformTextHeight(platforms),
+    lineOrder,
+    platforms: platformsInTextOrder(platforms),
+  };
+}
+
+function pagePlatformLines(pageNumber, platforms) {
+  const lines = new Map();
+  for (const platform of platformsInTextOrder(platforms)) {
+    if (!Number.isFinite(platform.textLineOrder)) continue;
+    if (!lines.has(platform.textLineOrder)) lines.set(platform.textLineOrder, []);
+    lines.get(platform.textLineOrder).push(platform);
+  }
+
+  return [...lines.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([lineOrder, linePlatforms]) => lineFromPlatforms(pageNumber, linePlatforms, lineOrder));
 }
 
 function buildWrapPortals() {
@@ -710,21 +758,10 @@ function buildWrapPortals() {
   }
 
   for (const [pageNumber, platforms] of byPage) {
-    const lines = [];
-    for (const platform of [...platforms].sort((a, b) => a.y - b.y || a.x - b.x)) {
-      const line = lines.find((item) => Math.abs(item.y - platform.y) <= Math.max(3, platform.textHeight * 0.45));
-      if (line) {
-        line.platforms.push(platform);
-        line.y = (line.y + platform.y) / 2;
-      } else {
-        lines.push({ y: platform.y, platforms: [platform] });
-      }
-    }
-
-    lines.sort((a, b) => a.y - b.y);
+    const lines = pagePlatformLines(pageNumber, platforms);
     lines.forEach((line, index) => {
       const lineId = `${pageNumber}:${index}`;
-      line.platforms.sort((a, b) => a.x - b.x);
+      line.platforms = platformsInTextOrder(line.platforms);
       for (const [wordIndex, platform] of line.platforms.entries()) {
         platform.lineId = lineId;
         platform.lineOrder = index;
@@ -733,8 +770,8 @@ function buildWrapPortals() {
     });
 
     for (let index = 0; index < lines.length - 1; index += 1) {
-      const fromLine = lines[index].platforms.sort((a, b) => a.x - b.x);
-      const toLine = lines[index + 1].platforms.sort((a, b) => a.x - b.x);
+      const fromLine = platformsInTextOrder(lines[index].platforms);
+      const toLine = platformsInTextOrder(lines[index + 1].platforms);
       const from = fromLine.at(-1);
       const to = toLine[0];
       if (!from || !to) continue;
@@ -826,7 +863,7 @@ function lineGroupsForPlatforms(platforms) {
     .sort((a, b) => a.page - b.page || a.lineOrder - b.lineOrder)
     .map((group) => ({
       ...group,
-      platforms: group.platforms.sort((a, b) => a.x - b.x),
+      platforms: platformsInTextOrder(group.platforms),
     }));
 }
 
@@ -1734,9 +1771,21 @@ async function loadPdf(file) {
 
     const textContent = await page.getTextContent();
     const pageAnnotations = await page.getAnnotations({ intent: "display" });
-    const pagePlatforms = textContent.items.flatMap((item, itemIndex) => (
-      splitTextIntoPlatforms(item, textContent.styles[item.fontName], viewport, offsetY, pageNumber, `${pageNumber}:${itemIndex}`)
-    ));
+    const pagePlatforms = [];
+    let textLineOrder = 0;
+    textContent.items.forEach((item, itemIndex) => {
+      pagePlatforms.push(...splitTextIntoPlatforms(
+        item,
+        textContent.styles[item.fontName],
+        viewport,
+        offsetY,
+        pageNumber,
+        `${pageNumber}:${itemIndex}`,
+        itemIndex,
+        textLineOrder,
+      ));
+      if (item.hasEOL) textLineOrder += 1;
+    });
     for (const platform of pagePlatforms) {
       world.minTextHeight = Math.min(world.minTextHeight, platform.textHeight);
     }
