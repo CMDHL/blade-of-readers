@@ -167,6 +167,7 @@ const textSelection = {
   endIndex: null,
 };
 let activeBladeSwing = null;
+const teleportSuppressedPointerEvents = new WeakSet();
 
 const translations = {
   en: {
@@ -1887,6 +1888,11 @@ function pointInRect(point, rect) {
     && point.y <= rect.y + rect.height;
 }
 
+function eventPathIncludesElement(event, element) {
+  if (event.composedPath?.().includes(element)) return true;
+  return event.target instanceof Node && element.contains(event.target);
+}
+
 function activeCollisionPlatforms() {
   if (!world.loaded) return [];
   const page = world.pages.find((item) => item.y <= player.y + player.height && item.y + item.height >= player.y);
@@ -2112,7 +2118,15 @@ function restartAutoScroll() {
 }
 
 function teleportPlayerToClick(event) {
-  if (!world.loaded || annotationMenuMode || event.button !== 0) return;
+  if (
+    teleportSuppressedPointerEvents.has(event)
+    || !world.loaded
+    || annotationMenuMode
+    || event.button !== 0
+    || !eventPathIncludesElement(event, readerStage)
+  ) {
+    return;
+  }
   const stageRect = readerStage.getBoundingClientRect();
   if (
     event.clientX < stageRect.left ||
@@ -2473,9 +2487,10 @@ window.addEventListener("wheel", markManualScrollIntent, { passive: true });
 window.addEventListener("touchmove", markManualScrollIntent, { passive: true });
 document.addEventListener("pointerdown", (event) => {
   if (!annotationMenuMode || event.target.closest("[data-annotation-index]")) return;
+  teleportSuppressedPointerEvents.add(event);
   setAnnotationMenuMode(false);
 }, { capture: true });
-window.addEventListener("pointerdown", teleportPlayerToClick);
+readerStage.addEventListener("pointerdown", teleportPlayerToClick);
 
 if (window.visualViewport) {
   window.visualViewport.addEventListener("resize", () => {
