@@ -32,9 +32,6 @@
               <input id="pdfInput" type="file" accept="application/pdf,.pdf">
               <span data-i18n="uploadPdf">Upload PDF</span>
             </label>
-            <button id="copySelectionButton" type="button" data-i18n="copySelection" disabled>Copy</button>
-            <button id="highlightSelectionButton" type="button" data-i18n="highlightSelection" disabled>Highlight</button>
-            <button id="commentSelectionButton" type="button" data-i18n="commentSelection" disabled>Comment</button>
             <button id="downloadAnnotatedButton" type="button" data-i18n="downloadAnnotated" disabled>Download Annotated PDF</button>
             <button id="collisionButton" type="button" aria-pressed="false" data-i18n="showCollisions">Show Collisions</button>
             <button id="resetButton" type="button" data-i18n="reset">Reset</button>
@@ -72,6 +69,18 @@
               <span data-i18n="dash">Dash</span>
               <button type="button" data-map-device="keyboard" data-map-action="dash"></button>
             </div>
+            <div class="control-row">
+              <span data-i18n="copySelection">Copy</span>
+              <button type="button" data-map-device="keyboard" data-map-action="copySelection"></button>
+            </div>
+            <div class="control-row">
+              <span data-i18n="highlightSelection">Highlight</span>
+              <button type="button" data-map-device="keyboard" data-map-action="highlightSelection"></button>
+            </div>
+            <div class="control-row">
+              <span data-i18n="commentSelection">Comment</span>
+              <button type="button" data-map-device="keyboard" data-map-action="commentSelection"></button>
+            </div>
           </div>
 
           <div class="control-group">
@@ -92,25 +101,50 @@
               <span data-i18n="dash">Dash</span>
               <button type="button" data-map-device="controller" data-map-action="dash"></button>
             </div>
+            <div class="control-row">
+              <span data-i18n="annotationActions">Actions</span>
+              <span class="fixed-control" data-i18n="radialControl">LB + right stick</span>
+            </div>
+            <div class="control-row">
+              <span data-i18n="menu">Menu</span>
+              <button type="button" data-map-device="controller" data-map-action="menu"></button>
+            </div>
           </div>
         </section>
       </header>
 
-      <section class="reader-stage" aria-label="PDF platformer" data-i18n-attr="aria-label:readerStageLabel">
-        <div id="pdfDocument" class="pdf-document"></div>
-        <div id="playerSprite" class="player-sprite" aria-hidden="true">
-          <span></span>
-        </div>
-        <div id="loadingOverlay" class="loading-overlay is-hidden" aria-live="polite" aria-busy="true">
-          <strong data-i18n="loadingTitle">Loading PDF...</strong>
-          <span data-i18n="loadingDescription">Preparing the level before switching views.</span>
-        </div>
-        <div id="dropZone" class="drop-zone">
-          <strong data-i18n="dropTitle">Upload a PDF to generate the level</strong>
-          <span data-i18n="dropDescription">Words and punctuation-separated chunks become invisible platforms at the text itself.</span>
-          <span class="keys" data-i18n="keysHelp">Move: A/D or arrows · Jump: Space · Attack: X · Dash: Shift · Down + Jump: pass through text</span>
-        </div>
-      </section>
+      <div class="reader-layout">
+        <aside id="annotationSidebar" class="annotation-sidebar" aria-label="Annotations" data-i18n-attr="aria-label:annotationsLabel">
+          <div class="annotation-sidebar-header">
+            <strong data-i18n="annotationsLabel">Annotations</strong>
+            <span id="annotationModeLabel" data-i18n="gameMode">Game</span>
+          </div>
+          <div id="annotationList" class="annotation-list"></div>
+        </aside>
+
+        <section class="reader-stage" aria-label="PDF platformer" data-i18n-attr="aria-label:readerStageLabel">
+          <div id="pdfDocument" class="pdf-document"></div>
+          <div id="playerSprite" class="player-sprite" aria-hidden="true">
+            <span></span>
+          </div>
+          <div id="loadingOverlay" class="loading-overlay is-hidden" aria-live="polite" aria-busy="true">
+            <strong data-i18n="loadingTitle">Loading PDF...</strong>
+            <span data-i18n="loadingDescription">Preparing the level before switching views.</span>
+          </div>
+          <div id="dropZone" class="drop-zone">
+            <strong data-i18n="dropTitle">Upload a PDF to generate the level</strong>
+            <span data-i18n="dropDescription">Words and punctuation-separated chunks become invisible platforms at the text itself.</span>
+            <span class="keys" data-i18n="keysHelp">Attack selects text · V/H/J copy, highlight, comment · Click entries to jump</span>
+          </div>
+        </section>
+      </div>
+
+      <div id="annotationRadial" class="annotation-radial is-hidden" aria-hidden="true">
+        <div class="annotation-radial-center">LB</div>
+        <div class="annotation-radial-option option-copy" data-radial-choice="copySelection" data-i18n="copySelection">Copy</div>
+        <div class="annotation-radial-option option-highlight" data-radial-choice="highlightSelection" data-i18n="highlightSelection">Highlight</div>
+        <div class="annotation-radial-option option-comment" data-radial-choice="commentSelection" data-i18n="commentSelection">Comment</div>
+      </div>
 
       <footer class="statusbar">
         <span id="statusText" data-status-key="waiting">Waiting for a PDF.</span>

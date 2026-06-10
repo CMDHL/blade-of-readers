@@ -11,6 +11,8 @@
   --shadow: 0 18px 60px rgba(26, 31, 44, 0.16);
   --shell-inline-padding: 18px;
   --statusbar-offset: 52px;
+  --sticky-topbar-height: 156px;
+  --sticky-sidebar-gap: 14px;
 }
 
 * {
@@ -24,6 +26,7 @@ body {
 
 body {
   margin: 0;
+  overflow-x: clip;
   background:
     linear-gradient(180deg, rgba(25, 118, 111, 0.09), rgba(25, 118, 111, 0) 34%),
     var(--paper);
@@ -175,9 +178,9 @@ button:disabled {
 .controls-panel {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
-  padding: 10px;
+  padding: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.82);
@@ -186,7 +189,7 @@ button:disabled {
 .control-group {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
@@ -200,16 +203,16 @@ button:disabled {
 .control-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 0.8rem;
 }
 
 .control-row button,
 .fixed-control {
-  min-width: 86px;
-  min-height: 34px;
-  padding: 0 10px;
+  min-width: 0;
+  min-height: 0;
+  padding: 4px 8px;
 }
 
 .control-row button {
@@ -228,9 +231,118 @@ button:disabled {
   background: rgba(255, 255, 255, 0.62);
 }
 
+.reader-layout {
+  width: min(1440px, 100%);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(230px, 320px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.annotation-sidebar {
+  position: sticky;
+  top: calc(var(--sticky-topbar-height) + var(--sticky-sidebar-gap));
+  max-height: calc(100vh - var(--sticky-topbar-height) - var(--sticky-sidebar-gap) - var(--statusbar-offset));
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 10px 30px rgba(26, 31, 44, 0.08);
+}
+
+.annotation-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.annotation-sidebar-header strong {
+  min-width: 0;
+  font-size: 0.92rem;
+}
+
+#annotationModeLabel {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.annotation-sidebar.is-menu-mode #annotationModeLabel {
+  border-color: rgba(25, 118, 111, 0.44);
+  color: var(--accent-dark);
+  background: rgba(25, 118, 111, 0.08);
+}
+
+.annotation-list {
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 10px;
+  overflow-y: auto;
+}
+
+.annotation-empty {
+  padding: 14px 4px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.annotation-entry {
+  width: 100%;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr);
+  display: grid;
+  gap: 5px;
+  justify-content: stretch;
+  justify-items: stretch;
+  align-items: start;
+  padding: 10px;
+  border-radius: 6px;
+  text-align: left;
+  white-space: normal;
+}
+
+.annotation-entry.is-selected {
+  border-color: rgba(25, 118, 111, 0.72);
+  outline: 2px solid rgba(25, 118, 111, 0.16);
+  background: rgba(25, 118, 111, 0.08);
+}
+
+.annotation-entry-meta {
+  width: 100%;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.annotation-entry-body {
+  width: 100%;
+  color: var(--ink);
+  font-size: 0.88rem;
+  line-height: 1.35;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
 .reader-stage {
   position: relative;
-  width: fit-content;
+  width: 100%;
+  min-width: 0;
   min-height: 0;
   margin: 0 auto;
   background: transparent;
@@ -239,7 +351,8 @@ button:disabled {
 
 .pdf-document {
   position: relative;
-  min-width: min(100vw - 36px, 900px);
+  width: 100%;
+  min-width: 0;
   min-height: min(76vh, 860px);
   opacity: 1;
   transition: opacity 160ms ease;
@@ -317,6 +430,91 @@ button:disabled {
   position: absolute;
   border-radius: 2px;
   background: rgba(0, 95, 255, 0.32);
+}
+
+.annotation-radial {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  z-index: 40;
+  width: 230px;
+  height: 230px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 1px solid rgba(23, 25, 31, 0.22);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 18px 60px rgba(26, 31, 44, 0.22);
+  pointer-events: none;
+}
+
+.annotation-radial.is-hidden {
+  display: none;
+}
+
+.annotation-radial::before {
+  content: "";
+  position: absolute;
+  inset: 22px;
+  border-radius: 50%;
+  border: 1px dashed rgba(23, 25, 31, 0.22);
+}
+
+.annotation-radial-center {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+  font-weight: 900;
+}
+
+.annotation-radial-option {
+  position: absolute;
+  min-width: 88px;
+  min-height: 36px;
+  display: grid;
+  place-items: center;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 0.86rem;
+  font-weight: 800;
+  box-shadow: 0 2px 0 rgba(23, 25, 31, 0.07);
+}
+
+.annotation-radial-option.is-selected {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.annotation-radial-option.is-disabled {
+  opacity: 0.48;
+}
+
+.option-copy {
+  left: 50%;
+  top: 18px;
+  transform: translateX(-50%);
+}
+
+.option-highlight {
+  left: 17px;
+  bottom: 42px;
+}
+
+.option-comment {
+  right: 17px;
+  bottom: 42px;
 }
 
 .collision-shape,
@@ -532,6 +730,19 @@ button:disabled {
   .upload-button,
   button {
     flex: 1 1 130px;
+  }
+
+  .reader-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .annotation-sidebar {
+    top: calc(var(--sticky-topbar-height) + 8px);
+    max-height: 34vh;
+  }
+
+  .annotation-entry {
+    flex: none;
   }
 
   .pdf-document {

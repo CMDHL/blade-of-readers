@@ -3,13 +3,15 @@ import * as pdfjsLib from "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38
 const PDFJS_SRC = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs";
 
 const pdfDocument = document.querySelector("#pdfDocument");
+const topbar = document.querySelector(".topbar");
 const readerStage = document.querySelector(".reader-stage");
 const playerSprite = document.querySelector("#playerSprite");
 const input = document.querySelector("#pdfInput");
-const copySelectionButton = document.querySelector("#copySelectionButton");
-const highlightSelectionButton = document.querySelector("#highlightSelectionButton");
-const commentSelectionButton = document.querySelector("#commentSelectionButton");
 const downloadAnnotatedButton = document.querySelector("#downloadAnnotatedButton");
+const annotationSidebar = document.querySelector("#annotationSidebar");
+const annotationList = document.querySelector("#annotationList");
+const annotationModeLabel = document.querySelector("#annotationModeLabel");
+const annotationRadial = document.querySelector("#annotationRadial");
 const resetButton = document.querySelector("#resetButton");
 const controlsPanel = document.querySelector("#controlsPanel");
 const collisionButton = document.querySelector("#collisionButton");
@@ -42,12 +44,16 @@ const keyMap = {
   jump: ["Space", "KeyZ"],
   dash: ["ShiftLeft", "ShiftRight", "KeyC"],
   attack: ["KeyX"],
+  copySelection: ["KeyV"],
+  highlightSelection: ["KeyH"],
+  commentSelection: ["KeyJ"],
 };
 
 const controllerMap = {
   jump: [0],
   attack: [2],
   dash: [7],
+  menu: [8],
 };
 
 const controllerButtonLabels = {
@@ -77,6 +83,7 @@ const world = {
   platforms: [],
   portals: [],
   annotations: [],
+  removedPdfAnnotations: [],
   loaded: false,
   renderWidth: 900,
   pageGap: 28,
@@ -131,6 +138,12 @@ const controllerDirections = {
   up: false,
   down: false,
 };
+const previousControllerDirections = {
+  left: false,
+  right: false,
+  up: false,
+  down: false,
+};
 let remappingAction = null;
 let remappingDevice = null;
 let controllerRemapBaseline = new Set();
@@ -142,6 +155,10 @@ let currentStatus = { key: "waiting", values: {} };
 let currentPageText = { page: 1, total: null };
 let currentPdfBytes = null;
 let currentPdfName = "annotated.pdf";
+let annotationMenuMode = false;
+let selectedAnnotationIndex = 0;
+let annotationRadialActive = false;
+let annotationRadialChoice = null;
 const textSelection = {
   anchorPlatform: null,
   startIndex: null,
@@ -174,10 +191,25 @@ const translations = {
     jump: "Jump",
     dash: "Dash",
     attack: "Attack",
+    menu: "Menu",
+    annotationActions: "Actions",
+    radialControl: "LB + right stick",
+    annotationsLabel: "Annotations",
+    gameMode: "Game",
+    menuMode: "Menu",
+    noAnnotations: "No annotations yet.",
+    highlightEntry: "Highlight",
+    commentEntry: "Comment",
+    pageEntry: "Page {page}",
+    pdfAnnotationEntry: "PDF annotation",
+    menuModeOn: "Annotation menu active.",
+    menuModeOff: "Game controls active.",
+    annotationFocused: "Focused annotation {index} of {total}.",
+    annotationDeleted: "Annotation deleted.",
     readerStageLabel: "PDF platformer",
     dropTitle: "Upload a PDF to generate the level",
     dropDescription: "Words and punctuation-separated chunks become invisible platforms at the text itself.",
-    keysHelp: "Move with keys or left stick. Jump: Space / A. Attack: X. Dash: Shift / RT. Mouse click teleports.",
+    keysHelp: "Attack selects text. V/H/J or LB + right stick handles copy, highlight, and comment. Click entries to jump; Delete removes one.",
     loadingTitle: "Loading PDF...",
     loadingDescription: "Preparing the level before switching views.",
     waiting: "Waiting for a PDF.",
@@ -225,10 +257,25 @@ const translations = {
     jump: "跳跃",
     dash: "冲刺",
     attack: "攻击",
+    menu: "菜单",
+    annotationActions: "操作",
+    radialControl: "LB + 右摇杆",
+    annotationsLabel: "批注",
+    gameMode: "游戏",
+    menuMode: "菜单",
+    noAnnotations: "还没有批注。",
+    highlightEntry: "高亮",
+    commentEntry: "评论",
+    pageEntry: "第 {page} 页",
+    pdfAnnotationEntry: "PDF 批注",
+    menuModeOn: "批注菜单已激活。",
+    menuModeOff: "游戏控制已激活。",
+    annotationFocused: "已定位第 {index} 条批注，共 {total} 条。",
+    annotationDeleted: "已删除批注。",
     readerStageLabel: "PDF 平台关卡",
     dropTitle: "上传 PDF 生成关卡",
     dropDescription: "单词和由标点分隔的文本片段会在原文位置变成隐形平台。",
-    keysHelp: "按键或左摇杆移动。跳跃：空格 / A。攻击：X。冲刺：Shift / RT。鼠标点击可传送。",
+    keysHelp: "攻击选择文字。V/H/J 或 LB + 右摇杆可复制、高亮、评论。点击条目可跳转，Delete 删除条目。",
     loadingTitle: "正在加载 PDF...",
     loadingDescription: "正在准备关卡，完成后会切换显示。",
     waiting: "等待上传 PDF。",
@@ -304,6 +351,8 @@ function applyLanguage(language) {
   updateCollisionButtonLabel();
   updateControlLabels();
   updateAnnotationControls();
+  renderAnnotationSidebar();
+  renderAnnotationRadial();
 }
 
 function actionPressed(action) {
@@ -350,6 +399,22 @@ function updateControlLabels() {
     }
     button.textContent = isRemapping ? t("pressKey") : formatKeyList(keyMap[action]);
   });
+  updateStickyTopbarHeight();
+}
+
+function updateStickyTopbarHeight() {
+  const height = Math.ceil(topbar?.getBoundingClientRect().height || 0);
+  if (height > 0) {
+    document.documentElement.style.setProperty("--sticky-topbar-height", `${height}px`);
+  }
+}
+
+function readerStageAvailableWidth() {
+  const stageWidth = readerStage.getBoundingClientRect().width;
+  const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
+  const shellPadding = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--shell-inline-padding")) || 0;
+  const fallbackWidth = Math.max(1, viewportWidth - shellPadding * 2);
+  return Math.max(1, Math.floor(Math.min(1100, stageWidth || fallbackWidth)));
 }
 
 function setDocumentSize() {
@@ -797,9 +862,9 @@ function selectedText() {
 
 function updateAnnotationControls() {
   const canUseSelection = world.loaded && hasTextSelection();
-  copySelectionButton.disabled = !canUseSelection;
-  highlightSelectionButton.disabled = !canUseSelection;
-  commentSelectionButton.disabled = !canUseSelection;
+  annotationRadial?.querySelectorAll(".annotation-radial-option").forEach((option) => {
+    option.classList.toggle("is-disabled", !canUseSelection);
+  });
   downloadAnnotatedButton.disabled = !currentPdfBytes;
 }
 
@@ -869,6 +934,7 @@ function addAnnotationFromSelection(comment = "") {
     createdAt: new Date().toISOString(),
   });
   renderAnnotationLayer();
+  renderAnnotationSidebar();
   clearTextSelection();
   return true;
 }
@@ -896,6 +962,212 @@ function renderAnnotationLayer() {
   const selectionLayer = pdfDocument.querySelector(".selection-layer");
   const collisionLayer = pdfDocument.querySelector(".collision-layer");
   pdfDocument.insertBefore(layer, selectionLayer || collisionLayer || playerSprite);
+}
+
+function annotationFirstPage(annotation) {
+  return annotation.rects?.[0]?.page || annotation.pdfPage || 1;
+}
+
+function annotationTitle(annotation) {
+  return annotation.comment ? t("commentEntry") : t("highlightEntry");
+}
+
+function compactText(text, maxLength = 96) {
+  const normalized = (text || "").replace(/\s+/gu, " ").trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength - 1).trim()}...`;
+}
+
+function clampSelectedAnnotationIndex() {
+  if (!world.annotations.length) {
+    selectedAnnotationIndex = 0;
+    return;
+  }
+  selectedAnnotationIndex = Math.max(0, Math.min(selectedAnnotationIndex, world.annotations.length - 1));
+}
+
+function renderAnnotationSidebar() {
+  if (!annotationList) return;
+  clampSelectedAnnotationIndex();
+  annotationSidebar.classList.toggle("is-menu-mode", annotationMenuMode);
+  annotationModeLabel.textContent = t(annotationMenuMode ? "menuMode" : "gameMode");
+  annotationList.replaceChildren();
+
+  if (!world.annotations.length) {
+    const empty = document.createElement("div");
+    empty.className = "annotation-empty";
+    empty.textContent = t("noAnnotations");
+    annotationList.append(empty);
+    return;
+  }
+
+  world.annotations.forEach((annotation, index) => {
+    const entry = document.createElement("button");
+    entry.type = "button";
+    entry.className = "annotation-entry";
+    entry.classList.toggle("is-selected", index === selectedAnnotationIndex);
+    entry.dataset.annotationIndex = String(index);
+
+    const meta = document.createElement("span");
+    meta.className = "annotation-entry-meta";
+    meta.textContent = `${annotationTitle(annotation)} - ${t("pageEntry", { page: annotationFirstPage(annotation) })}`;
+
+    const body = document.createElement("span");
+    body.className = "annotation-entry-body";
+    if (annotation.comment) {
+      body.textContent = annotation.comment;
+    } else {
+      body.textContent = compactText(annotation.text) || t(annotation.source === "pdf" ? "pdfAnnotationEntry" : "highlightEntry");
+    }
+
+    entry.append(meta, body);
+    annotationList.append(entry);
+  });
+
+  annotationList
+    .querySelector(`[data-annotation-index="${selectedAnnotationIndex}"]`)
+    ?.scrollIntoView({ block: "nearest" });
+}
+
+function setAnnotationMenuMode(isActive) {
+  annotationMenuMode = isActive;
+  if (annotationMenuMode) {
+    player.vx = 0;
+    player.vy = 0;
+    player.jumpHeld = false;
+    player.dropThrough = false;
+  }
+  clampSelectedAnnotationIndex();
+  renderAnnotationSidebar();
+  setStatus(annotationMenuMode ? "menuModeOn" : "menuModeOff");
+}
+
+function toggleAnnotationMenuMode() {
+  setAnnotationMenuMode(!annotationMenuMode);
+}
+
+function selectAnnotationEntry(delta) {
+  if (!world.annotations.length) return;
+  selectedAnnotationIndex = (selectedAnnotationIndex + delta + world.annotations.length) % world.annotations.length;
+  renderAnnotationSidebar();
+}
+
+function selectedAnnotation() {
+  clampSelectedAnnotationIndex();
+  return world.annotations[selectedAnnotationIndex] || null;
+}
+
+function focusSelectedAnnotation() {
+  const annotation = selectedAnnotation();
+  const rect = annotation?.rects?.[0];
+  if (!rect || !world.loaded) return;
+
+  player.x = Math.max(0, Math.min(world.cssWidth - player.width, rect.x));
+  player.y = Math.max(0, Math.min(world.cssHeight - player.height, rect.y - player.height - 4));
+  player.vx = 0;
+  player.vy = 0;
+  player.grounded = false;
+  player.groundedByViewport = false;
+  player.jumpHeld = false;
+  player.jumpFrames = 0;
+  player.dropThrough = false;
+  player.coyote = 0;
+  player.dashFrames = 0;
+  player.dashCooldown = 0;
+  restartAutoScroll();
+  updateActivePage();
+  renderPlayer();
+  setStatus("annotationFocused", {
+    index: selectedAnnotationIndex + 1,
+    total: world.annotations.length,
+  });
+}
+
+function deleteSelectedAnnotation() {
+  const annotation = selectedAnnotation();
+  if (!annotation) return;
+
+  if (annotation.source === "pdf") {
+    world.removedPdfAnnotations.push({
+      page: annotation.pdfPage || annotationFirstPage(annotation),
+      id: annotation.pdfId || annotation.id || "",
+      rect: annotation.pdfRect || [],
+      quadPoints: annotation.pdfQuadPoints || [],
+    });
+  }
+
+  world.annotations.splice(selectedAnnotationIndex, 1);
+  clampSelectedAnnotationIndex();
+  renderAnnotationLayer();
+  renderAnnotationSidebar();
+  setStatus("annotationDeleted");
+}
+
+function handleAnnotationMenuKey(code) {
+  if (keyMap.up.includes(code)) {
+    selectAnnotationEntry(-1);
+    return true;
+  }
+  if (keyMap.down.includes(code)) {
+    selectAnnotationEntry(1);
+    return true;
+  }
+  if (keyMap.jump.includes(code)) {
+    focusSelectedAnnotation();
+    return true;
+  }
+  if (keyMap.attack.includes(code)) {
+    deleteSelectedAnnotation();
+    return true;
+  }
+  return false;
+}
+
+async function performSelectionAction(action) {
+  if (!hasTextSelection()) return;
+  if (action === "copySelection") {
+    await copySelectedText();
+    return;
+  }
+  if (action === "highlightSelection") {
+    if (!addAnnotationFromSelection()) return;
+    setStatus("highlightAdded");
+    return;
+  }
+  if (action === "commentSelection") {
+    const comment = window.prompt(t("commentPrompt"), "");
+    if (comment === null) return;
+    if (!addAnnotationFromSelection(comment)) return;
+    setStatus("commentAdded");
+  }
+}
+
+function radialActionOptions() {
+  return [
+    { action: "copySelection", angle: -90 },
+    { action: "highlightSelection", angle: 150 },
+    { action: "commentSelection", angle: 30 },
+  ];
+}
+
+function angleDistance(a, b) {
+  return Math.abs((((a - b) + 540) % 360) - 180);
+}
+
+function radialChoiceFromRightStick(x, y) {
+  if (Math.hypot(x, y) < 0.45) return null;
+  const angle = Math.atan2(y, x) * 180 / Math.PI;
+  return radialActionOptions()
+    .sort((a, b) => angleDistance(angle, a.angle) - angleDistance(angle, b.angle))[0]
+    ?.action || null;
+}
+
+function renderAnnotationRadial() {
+  if (!annotationRadial) return;
+  annotationRadial.classList.toggle("is-hidden", !annotationRadialActive);
+  annotationRadial.querySelectorAll("[data-radial-choice]").forEach((option) => {
+    option.classList.toggle("is-selected", option.dataset.radialChoice === annotationRadialChoice);
+  });
 }
 
 function viewportRectToWorldRect(page, viewportRect) {
@@ -977,7 +1249,8 @@ function importPdfAnnotations() {
   for (const page of world.pages) {
     for (const annotation of page.annotations || []) {
       if (!isHighlightAnnotation(annotation)) continue;
-      const rects = quadPointsToWorldRects(page, annotation.quadPoints);
+      const pdfQuadPoints = flatQuadPoints(annotation.quadPoints);
+      const rects = quadPointsToWorldRects(page, pdfQuadPoints);
       const fallbackRect = pdfRectToWorldRect(page, annotation.rect);
       if (!rects.length && fallbackRect) rects.push(fallbackRect);
       if (!rects.length) continue;
@@ -986,6 +1259,10 @@ function importPdfAnnotations() {
         id: annotation.id || createAnnotationId(),
         type: "highlight",
         source: "pdf",
+        pdfId: annotation.id || "",
+        pdfPage: page.number,
+        pdfRect: Array.isArray(annotation.rect) ? [...annotation.rect] : [],
+        pdfQuadPoints,
         text: "",
         comment: annotationText(annotation.contentsObj) || annotationText(annotation.contents),
         rects,
@@ -1024,6 +1301,68 @@ function pageAnnotationArray(pdfDoc, page) {
     page.node.set(PDFName.of("Annots"), annots);
   }
   return annots;
+}
+
+function pdfObjectText(value) {
+  if (!value) return "";
+  if (typeof value.decodeText === "function") return value.decodeText();
+  if (typeof value.asString === "function") return value.asString();
+  return String(value);
+}
+
+function pdfArrayValues(array) {
+  if (!array || typeof array.size !== "function") return [];
+  const values = [];
+  for (let index = 0; index < array.size(); index += 1) {
+    const value = array.get(index);
+    const number = typeof value?.asNumber === "function" ? value.asNumber() : value?.numberValue;
+    if (Number.isFinite(number)) values.push(number);
+  }
+  return values;
+}
+
+function nearlyEqualNumberArray(a = [], b = [], tolerance = 0.75) {
+  if (!a.length || a.length !== b.length) return false;
+  return a.every((value, index) => Math.abs(value - b[index]) <= tolerance);
+}
+
+function pdfAnnotationMatchesRemoval(pdfDoc, annotRef, removal) {
+  const annot = pdfDoc.context.lookup(annotRef);
+  const subtype = annot?.lookup?.(PDFName.of("Subtype"));
+  if (!String(subtype).includes("Highlight")) return false;
+
+  const nm = pdfObjectText(annot.lookup?.(PDFName.of("NM")));
+  if (removal.id && nm && removal.id === nm) return true;
+
+  const rect = pdfArrayValues(annot.lookup?.(PDFName.of("Rect"), PDFArray));
+  const quadPoints = pdfArrayValues(annot.lookup?.(PDFName.of("QuadPoints"), PDFArray));
+  return nearlyEqualNumberArray(rect, removal.rect)
+    || nearlyEqualNumberArray(quadPoints, removal.quadPoints);
+}
+
+function removePdfAnnotations(pdfDoc) {
+  if (!world.removedPdfAnnotations.length) return;
+
+  const removalsByPage = new Map();
+  for (const removal of world.removedPdfAnnotations) {
+    if (!removalsByPage.has(removal.page)) removalsByPage.set(removal.page, []);
+    removalsByPage.get(removal.page).push(removal);
+  }
+
+  pdfDoc.getPages().forEach((page, pageIndex) => {
+    const removals = removalsByPage.get(pageIndex + 1);
+    if (!removals?.length) return;
+
+    const annots = page.node.lookup(PDFName.of("Annots"), PDFArray);
+    if (!annots) return;
+
+    for (let index = annots.size() - 1; index >= 0; index -= 1) {
+      const annotRef = annots.get(index);
+      if (removals.some((removal) => pdfAnnotationMatchesRemoval(pdfDoc, annotRef, removal))) {
+        annots.remove(index);
+      }
+    }
+  });
 }
 
 function worldRectToPdfQuad(page, rect) {
@@ -1093,7 +1432,8 @@ function downloadBytes(bytes, name) {
 async function annotatedPdfBytes() {
   if (!currentPdfBytes) return null;
   const sessionAnnotations = world.annotations.filter((annotation) => annotation.source === "session");
-  if (!sessionAnnotations.length) return new Uint8Array(currentPdfBytes.slice(0));
+  const hasPdfAnnotationRemovals = world.removedPdfAnnotations.length > 0;
+  if (!sessionAnnotations.length && !hasPdfAnnotationRemovals) return new Uint8Array(currentPdfBytes.slice(0));
 
   if (!PDFDocument || !PDFName || !PDFNumber || !PDFArray || !PDFString || !PDFHexString) {
     throw new Error("pdf-lib-missing");
@@ -1101,6 +1441,7 @@ async function annotatedPdfBytes() {
 
   const pdfDoc = await PDFDocument.load(currentPdfBytes.slice(0));
   const pdfPages = pdfDoc.getPages();
+  removePdfAnnotations(pdfDoc);
 
   for (const annotation of sessionAnnotations) {
     const rectsByPage = new Map();
@@ -1323,6 +1664,12 @@ async function loadPdf(file) {
   currentPdfBytes = null;
   currentPdfName = file?.name || "annotated.pdf";
   world.annotations = [];
+  world.removedPdfAnnotations = [];
+  annotationMenuMode = false;
+  selectedAnnotationIndex = 0;
+  annotationRadialActive = false;
+  annotationRadialChoice = null;
+  renderAnnotationRadial();
   updateAnnotationControls();
   clearTextSelection({ render: false });
   clearPdfDocument();
@@ -1332,22 +1679,22 @@ async function loadPdf(file) {
   currentPdfBytes = bytes.slice(0);
   const pdf = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
   const firstPage = await pdf.getPage(1);
-  const firstViewport = firstPage.getViewport({ scale: 1 });
-  const availableWidth = Math.max(320, Math.min(1100, window.innerWidth - 36));
-  const renderScale = availableWidth / firstViewport.width;
+  const availableWidth = readerStageAvailableWidth();
 
   world.renderWidth = availableWidth;
   world.pages = [];
   world.platforms = [];
   world.portals = [];
   world.annotations = [];
+  world.removedPdfAnnotations = [];
   world.activePlatformLineId = null;
   world.minTextHeight = Infinity;
 
   let offsetY = 0;
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
     const page = pageNumber === 1 ? firstPage : await pdf.getPage(pageNumber);
-    const viewport = page.getViewport({ scale: renderScale });
+    const baseViewport = page.getViewport({ scale: 1 });
+    const viewport = page.getViewport({ scale: availableWidth / baseViewport.width });
     const pageCanvas = document.createElement("canvas");
     pageCanvas.className = "pdf-page";
     pageCanvas.width = Math.ceil(viewport.width);
@@ -1409,6 +1756,7 @@ async function loadPdf(file) {
   importPdfAnnotations();
   renderCollisionLayer();
   renderAnnotationLayer();
+  renderAnnotationSidebar();
   renderSelectionLayer();
   resetPlayer();
   setLoadingPdf(false);
@@ -1652,7 +2000,7 @@ function restartAutoScroll() {
 }
 
 function teleportPlayerToClick(event) {
-  if (!world.loaded || event.button !== 0) return;
+  if (!world.loaded || annotationMenuMode || event.button !== 0) return;
   const stageRect = readerStage.getBoundingClientRect();
   if (
     event.clientX < stageRect.left ||
@@ -1698,11 +2046,22 @@ function pressedGamepadButtons(gamepad) {
   return pressed;
 }
 
+function storePreviousControllerState(pressedButtons) {
+  previousControllerButtons.clear();
+  pressedButtons.forEach((button) => previousControllerButtons.add(button));
+  previousControllerDirections.left = controllerDirections.left;
+  previousControllerDirections.right = controllerDirections.right;
+  previousControllerDirections.up = controllerDirections.up;
+  previousControllerDirections.down = controllerDirections.down;
+}
+
 function updateControllerInput() {
   const gamepad = activeGamepad();
   const pressedButtons = pressedGamepadButtons(gamepad);
   const axisX = gamepad?.axes?.[0] || 0;
   const axisY = gamepad?.axes?.[1] || 0;
+  const rightStickX = gamepad?.axes?.[2] || 0;
+  const rightStickY = gamepad?.axes?.[3] || 0;
   const deadzone = 0.35;
 
   controllerDirections.left = axisX < -deadzone;
@@ -1732,6 +2091,42 @@ function updateControllerInput() {
     const attackWasPressed = controllerMap.attack.some((button) => previousControllerButtons.has(button));
     const dashPressed = controllerMap.dash.some((button) => controllerButtons.has(button));
     const dashWasPressed = controllerMap.dash.some((button) => previousControllerButtons.has(button));
+    const menuPressed = controllerMap.menu.some((button) => controllerButtons.has(button));
+    const menuWasPressed = controllerMap.menu.some((button) => previousControllerButtons.has(button));
+    const leftBumperPressed = controllerButtons.has(4);
+
+    if (menuPressed && !menuWasPressed) {
+      toggleAnnotationMenuMode();
+    }
+
+    if (annotationMenuMode) {
+      if (controllerDirections.up && !previousControllerDirections.up) selectAnnotationEntry(-1);
+      if (controllerDirections.down && !previousControllerDirections.down) selectAnnotationEntry(1);
+      if (jumpPressed && !jumpWasPressed) focusSelectedAnnotation();
+      if (attackPressed && !attackWasPressed) deleteSelectedAnnotation();
+      if (!jumpPressed && jumpWasPressed) {
+        player.jumpHeld = false;
+        player.dropThrough = false;
+      }
+      storePreviousControllerState(pressedButtons);
+      return;
+    }
+
+    if (leftBumperPressed || annotationRadialActive) {
+      if (leftBumperPressed) {
+        annotationRadialActive = true;
+        annotationRadialChoice = radialChoiceFromRightStick(rightStickX, rightStickY);
+        renderAnnotationRadial();
+      } else {
+        const releasedChoice = annotationRadialChoice;
+        annotationRadialActive = false;
+        annotationRadialChoice = null;
+        renderAnnotationRadial();
+        if (releasedChoice) performSelectionAction(releasedChoice);
+      }
+      storePreviousControllerState(pressedButtons);
+      return;
+    }
 
     if (jumpPressed && !jumpWasPressed) {
       restartAutoScroll();
@@ -1752,13 +2147,12 @@ function updateControllerInput() {
     }
   }
 
-  previousControllerButtons.clear();
-  pressedButtons.forEach((button) => previousControllerButtons.add(button));
+  storePreviousControllerState(pressedButtons);
 }
 
 function tick() {
   updateControllerInput();
-  if (world.loaded) updatePlayer();
+  if (world.loaded && !annotationMenuMode) updatePlayer();
   renderPlayer();
   requestAnimationFrame(tick);
 }
@@ -1773,7 +2167,14 @@ async function handlePdfFile(file) {
     world.loaded = false;
     currentPdfBytes = null;
     world.annotations = [];
+    world.removedPdfAnnotations = [];
+    annotationMenuMode = false;
+    selectedAnnotationIndex = 0;
+    annotationRadialActive = false;
+    annotationRadialChoice = null;
+    renderAnnotationRadial();
     updateAnnotationControls();
+    renderAnnotationSidebar();
     playerSprite.hidden = true;
     setStatus("pdfReadError");
     dropZone.classList.remove("is-hidden");
@@ -1846,20 +2247,12 @@ resetButton.addEventListener("click", () => {
   autoCenterPlayer();
 });
 
-copySelectionButton.addEventListener("click", () => {
-  copySelectedText();
-});
-
-highlightSelectionButton.addEventListener("click", () => {
-  if (!addAnnotationFromSelection()) return;
-  setStatus("highlightAdded");
-});
-
-commentSelectionButton.addEventListener("click", () => {
-  const comment = window.prompt(t("commentPrompt"), "");
-  if (comment === null) return;
-  if (!addAnnotationFromSelection(comment)) return;
-  setStatus("commentAdded");
+annotationList.addEventListener("click", (event) => {
+  const entry = event.target.closest("[data-annotation-index]");
+  if (!entry) return;
+  selectedAnnotationIndex = Number(entry.dataset.annotationIndex) || 0;
+  setAnnotationMenuMode(true);
+  focusSelectedAnnotation();
 });
 
 downloadAnnotatedButton.addEventListener("click", () => {
@@ -1903,14 +2296,32 @@ window.addEventListener("keydown", (event) => {
   }
 
   const isControlKey = Object.values(keyMap).flat().includes(event.code);
+  const wasPressed = keys.has(event.code);
   if (["PageDown", "PageUp", "Home", "End"].includes(event.code)) markManualScrollIntent();
   if (isControlKey) {
     event.preventDefault();
-    restartAutoScroll();
   }
-  if (!keys.has(event.code) && keyMap.jump.includes(event.code)) startJump();
-  if (!keys.has(event.code) && keyMap.dash.includes(event.code)) startDash();
-  if (!keys.has(event.code) && keyMap.attack.includes(event.code)) startAttack();
+
+  if (!wasPressed && event.code === "Delete") {
+    event.preventDefault();
+    deleteSelectedAnnotation();
+    keys.add(event.code);
+    return;
+  }
+
+  if (annotationMenuMode) {
+    if (!wasPressed) handleAnnotationMenuKey(event.code);
+    keys.add(event.code);
+    return;
+  }
+
+  if (isControlKey) restartAutoScroll();
+  if (!wasPressed && keyMap.jump.includes(event.code)) startJump();
+  if (!wasPressed && keyMap.dash.includes(event.code)) startDash();
+  if (!wasPressed && keyMap.attack.includes(event.code)) startAttack();
+  if (!wasPressed && keyMap.copySelection.includes(event.code)) performSelectionAction("copySelection");
+  if (!wasPressed && keyMap.highlightSelection.includes(event.code)) performSelectionAction("highlightSelection");
+  if (!wasPressed && keyMap.commentSelection.includes(event.code)) performSelectionAction("commentSelection");
   keys.add(event.code);
 });
 
@@ -1929,12 +2340,17 @@ window.addEventListener("scroll", () => {
 }, { passive: true });
 
 window.addEventListener("resize", () => {
+  updateStickyTopbarHeight();
   if (!world.loaded) return;
   keepPlayerInVisibleWindow();
 });
 
 window.addEventListener("wheel", markManualScrollIntent, { passive: true });
 window.addEventListener("touchmove", markManualScrollIntent, { passive: true });
+document.addEventListener("pointerdown", (event) => {
+  if (!annotationMenuMode || event.target.closest("[data-annotation-index]")) return;
+  setAnnotationMenuMode(false);
+}, { capture: true });
 window.addEventListener("pointerdown", teleportPlayerToClick);
 
 if (window.visualViewport) {
@@ -1949,6 +2365,10 @@ if (window.visualViewport) {
 }
 
 applyLanguage(detectLanguage());
+if (window.ResizeObserver && topbar) {
+  new ResizeObserver(updateStickyTopbarHeight).observe(topbar);
+}
+updateStickyTopbarHeight();
 setDocumentSize();
 resetPlayer();
 tick();

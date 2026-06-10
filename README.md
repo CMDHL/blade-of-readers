@@ -27,11 +27,19 @@ Then open `http://localhost:8000`.
 - hold jump: jump higher, up to a limit
 - down + jump: pass downward through text platforms until jump is released
 - shift or `C`: dash
+- `V`: copy selected text
+- `H`: highlight selected text
+- `J`: comment on selected text
+- click an annotation entry: jump to that highlight / comment
+- `Delete`: delete the selected annotation entry
 - controller left stick: move
 - controller `A`: jump
 - controller right trigger: dash
-- use the controls bar to remap keyboard inputs and controller jump / dash buttons
-- attack words to select text; use Copy, Highlight, Comment, or Download Annotated PDF in the top bar
+- hold controller `LB`, point the right stick at Copy / Highlight / Comment, then release `LB` to confirm
+- controller `View`: toggle annotation-list control
+- use the controls bar to remap keyboard inputs and controller jump / dash / menu buttons
+- attack words to select text; use annotation action keys or the controller radial, then Download Annotated PDF in the top bar
+- in annotation-list control, use up / down to select an entry, jump to focus it, and attack to delete it
 
 ## Notes
 
