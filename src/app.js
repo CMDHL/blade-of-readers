@@ -1775,6 +1775,13 @@ function rectsOverlap(a, b) {
   return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
 }
 
+function pointInRect(point, rect) {
+  return point.x >= rect.x
+    && point.x <= rect.x + rect.width
+    && point.y >= rect.y
+    && point.y <= rect.y + rect.height;
+}
+
 function activeCollisionPlatforms() {
   if (!world.loaded) return [];
   const page = world.pages.find((item) => item.y <= player.y + player.height && item.y + item.height >= player.y);
@@ -2013,13 +2020,20 @@ function teleportPlayerToClick(event) {
 
   const offset = documentPageOffset();
   const viewport = viewportPageRect();
-  player.x = event.clientX + viewport.left - offset.left - player.width / 2;
-  player.y = event.clientY + viewport.top - offset.top - player.height / 2;
+  const clickPoint = {
+    x: event.clientX + viewport.left - offset.left,
+    y: event.clientY + viewport.top - offset.top,
+  };
+  const clickedPlatform = world.platforms.find((platform) => pointInRect(clickPoint, platform));
+  if (!clickedPlatform) return;
+
+  player.x = clickPoint.x - player.width / 2;
+  player.y = clickedPlatform.y - player.height;
   player.x = Math.max(0, Math.min(world.cssWidth - player.width, player.x));
   player.y = Math.max(0, Math.min(world.cssHeight - player.height, player.y));
   player.vx = 0;
   player.vy = 0;
-  player.grounded = false;
+  player.grounded = true;
   player.groundedByViewport = false;
   player.jumpHeld = false;
   player.jumpFrames = 0;
@@ -2027,6 +2041,7 @@ function teleportPlayerToClick(event) {
   player.coyote = 0;
   player.dashFrames = 0;
   player.dashCooldown = 0;
+  world.activePlatformLineId = clickedPlatform.lineId || world.activePlatformLineId;
   restartAutoScroll();
   updateActivePage();
   renderPlayer();
