@@ -4,6 +4,7 @@ const PDFJS_SRC = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.wor
 
 const pdfDocument = document.querySelector("#pdfDocument");
 const topbar = document.querySelector(".topbar");
+const topbarToggleButton = document.querySelector("#topbarToggleButton");
 const readerStage = document.querySelector(".reader-stage");
 const playerSprite = document.querySelector("#playerSprite");
 const input = document.querySelector("#pdfInput");
@@ -154,7 +155,8 @@ let currentLanguage = "en";
 let currentStatus = { key: "waiting", values: {} };
 let currentPageText = { page: 1, total: null };
 let currentPdfBytes = null;
-let currentPdfName = "annotated.pdf";
+let currentPdfName = "document.pdf";
+let topbarHidden = false;
 let annotationMenuMode = false;
 let selectedAnnotationIndex = 0;
 let annotationRadialActive = false;
@@ -176,6 +178,8 @@ const translations = {
     highlightSelection: "Highlight",
     commentSelection: "Comment",
     downloadAnnotated: "Download Annotated PDF",
+    hideTopbar: "Hide Top",
+    showTopbar: "Show Top",
     hideCollisions: "Hide Collisions",
     showCollisions: "Show Collisions",
     reset: "Reset",
@@ -242,6 +246,8 @@ const translations = {
     highlightSelection: "高亮",
     commentSelection: "评论",
     downloadAnnotated: "下载批注 PDF",
+    hideTopbar: "隐藏顶部",
+    showTopbar: "显示顶部",
     hideCollisions: "隐藏碰撞",
     showCollisions: "显示碰撞",
     reset: "重置",
@@ -329,6 +335,21 @@ function updateCollisionButtonLabel() {
   collisionButton.textContent = collisionsVisible ? t("hideCollisions") : t("showCollisions");
 }
 
+function updateTopbarToggleButton() {
+  const key = topbarHidden ? "showTopbar" : "hideTopbar";
+  topbarToggleButton.dataset.i18n = key;
+  topbarToggleButton.textContent = t(key);
+  topbarToggleButton.setAttribute("aria-label", t(key));
+  topbarToggleButton.setAttribute("aria-expanded", String(!topbarHidden));
+}
+
+function setTopbarHidden(isHidden) {
+  topbarHidden = isHidden;
+  topbar.classList.toggle("is-hidden", topbarHidden);
+  updateTopbarToggleButton();
+  updateStickyTopbarHeight();
+}
+
 function applyLanguage(language) {
   currentLanguage = translations[language] ? language : "en";
   document.documentElement.lang = currentLanguage === "zh" ? "zh-CN" : "en";
@@ -349,6 +370,7 @@ function applyLanguage(language) {
   statusText.textContent = t(currentStatus.key, currentStatus.values);
   updatePageText();
   updateCollisionButtonLabel();
+  updateTopbarToggleButton();
   updateControlLabels();
   updateAnnotationControls();
   renderAnnotationSidebar();
@@ -403,10 +425,8 @@ function updateControlLabels() {
 }
 
 function updateStickyTopbarHeight() {
-  const height = Math.ceil(topbar?.getBoundingClientRect().height || 0);
-  if (height > 0) {
-    document.documentElement.style.setProperty("--sticky-topbar-height", `${height}px`);
-  }
+  const height = topbarHidden ? 0 : Math.ceil(topbar?.getBoundingClientRect().height || 0);
+  document.documentElement.style.setProperty("--sticky-topbar-height", `${height}px`);
 }
 
 function readerStageAvailableWidth() {
@@ -1413,8 +1433,8 @@ function addPdfHighlightAnnotation(pdfDoc, page, annotation) {
 }
 
 function annotationDownloadName() {
-  const baseName = currentPdfName.replace(/\.pdf$/iu, "");
-  return `${baseName || "document"}-annotated.pdf`;
+  const name = currentPdfName.trim() || "document.pdf";
+  return /\.pdf$/iu.test(name) ? name : `${name}.pdf`;
 }
 
 function downloadBytes(bytes, name) {
@@ -1662,7 +1682,7 @@ async function loadPdf(file) {
   playerSprite.hidden = true;
   dropZone.classList.add("is-hidden");
   currentPdfBytes = null;
-  currentPdfName = file?.name || "annotated.pdf";
+  currentPdfName = file?.name || "document.pdf";
   world.annotations = [];
   world.removedPdfAnnotations = [];
   annotationMenuMode = false;
@@ -1773,6 +1793,13 @@ async function loadPdf(file) {
 
 function rectsOverlap(a, b) {
   return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+}
+
+function pointInRect(point, rect) {
+  return point.x >= rect.x
+    && point.x <= rect.x + rect.width
+    && point.y >= rect.y
+    && point.y <= rect.y + rect.height;
 }
 
 function activeCollisionPlatforms() {
@@ -2013,13 +2040,20 @@ function teleportPlayerToClick(event) {
 
   const offset = documentPageOffset();
   const viewport = viewportPageRect();
-  player.x = event.clientX + viewport.left - offset.left - player.width / 2;
-  player.y = event.clientY + viewport.top - offset.top - player.height / 2;
+  const clickPoint = {
+    x: event.clientX + viewport.left - offset.left,
+    y: event.clientY + viewport.top - offset.top,
+  };
+  const clickedPlatform = world.platforms.find((platform) => pointInRect(clickPoint, platform));
+  if (!clickedPlatform) return;
+
+  player.x = clickPoint.x - player.width / 2;
+  player.y = clickedPlatform.y - player.height;
   player.x = Math.max(0, Math.min(world.cssWidth - player.width, player.x));
   player.y = Math.max(0, Math.min(world.cssHeight - player.height, player.y));
   player.vx = 0;
   player.vy = 0;
-  player.grounded = false;
+  player.grounded = true;
   player.groundedByViewport = false;
   player.jumpHeld = false;
   player.jumpFrames = 0;
@@ -2027,6 +2061,7 @@ function teleportPlayerToClick(event) {
   player.coyote = 0;
   player.dashFrames = 0;
   player.dashCooldown = 0;
+  world.activePlatformLineId = clickedPlatform.lineId || world.activePlatformLineId;
   restartAutoScroll();
   updateActivePage();
   renderPlayer();
@@ -2257,6 +2292,10 @@ annotationList.addEventListener("click", (event) => {
 
 downloadAnnotatedButton.addEventListener("click", () => {
   downloadAnnotatedPdf();
+});
+
+topbarToggleButton.addEventListener("click", () => {
+  setTopbarHidden(!topbarHidden);
 });
 
 collisionButton.addEventListener("click", () => {
