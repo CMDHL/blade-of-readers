@@ -8,10 +8,11 @@ Upload a PDF and its pages are parsed in the browser:
 - the rendered PDF stays visible as-is; collision platforms are invisible and aligned to the text
 - the square reader can move, use variable-height jumps, and drop through text platforms
 - the browser window acts as the player boundary while scrolling keeps the reader centered when possible
+- selected text can be copied, highlighted, commented, and downloaded as standard PDF annotations
 
 ## Run Locally
 
-This is a static GitHub Pages-friendly app. Because it uses module scripts and PDF.js from a CDN, run it through a local static server:
+This is a static GitHub Pages-friendly app. Because it uses module scripts plus PDF.js and pdf-lib from CDNs, run it through a local static server:
 
 ```sh
 python3 -m http.server 8000
@@ -30,6 +31,7 @@ Then open `http://localhost:8000`.
 - controller `A`: jump
 - controller right trigger: dash
 - use the controls bar to remap keyboard inputs and controller jump / dash buttons
+- attack words to select text; use Copy, Highlight, Comment, or Download Annotated PDF in the top bar
 
 ## Notes
 

@@ -6,6 +6,10 @@ const pdfDocument = document.querySelector("#pdfDocument");
 const readerStage = document.querySelector(".reader-stage");
 const playerSprite = document.querySelector("#playerSprite");
 const input = document.querySelector("#pdfInput");
+const copySelectionButton = document.querySelector("#copySelectionButton");
+const highlightSelectionButton = document.querySelector("#highlightSelectionButton");
+const commentSelectionButton = document.querySelector("#commentSelectionButton");
+const downloadAnnotatedButton = document.querySelector("#downloadAnnotatedButton");
 const resetButton = document.querySelector("#resetButton");
 const controlsPanel = document.querySelector("#controlsPanel");
 const collisionButton = document.querySelector("#collisionButton");
@@ -16,6 +20,15 @@ const statusText = document.querySelector("#statusText");
 const pageText = document.querySelector("#pageText");
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_SRC;
+
+const {
+  PDFDocument,
+  PDFName,
+  PDFNumber,
+  PDFArray,
+  PDFHexString,
+  PDFString,
+} = window.PDFLib || {};
 
 const punctuationPattern = /[\s.,;:!?()[\]{}"'`~@#$%^&*_+=<>/\\|，。？！、；：（）【】《》“”‘’—…·「」『』]+/u;
 const textSegmentPattern = /[\s.,;:!?()[\]{}"'`~@#$%^&*_+=<>/\\|，。？！、；：（）【】《》“”‘’—…·「」『』]+|[^\s.,;:!?()[\]{}"'`~@#$%^&*_+=<>/\\|，。？！、；：（）【】《》“”‘’—…·「」『』]+/gu;
@@ -63,6 +76,7 @@ const world = {
   pages: [],
   platforms: [],
   portals: [],
+  annotations: [],
   loaded: false,
   renderWidth: 900,
   pageGap: 28,
@@ -126,6 +140,8 @@ let programmaticScrollUntil = 0;
 let currentLanguage = "en";
 let currentStatus = { key: "waiting", values: {} };
 let currentPageText = { page: 1, total: null };
+let currentPdfBytes = null;
+let currentPdfName = "annotated.pdf";
 const textSelection = {
   anchorPlatform: null,
   startIndex: null,
@@ -139,6 +155,10 @@ const translations = {
     tagline: "Turn complicated articles into simple platformer levels.",
     languageLabel: "Language",
     uploadPdf: "Upload PDF",
+    copySelection: "Copy",
+    highlightSelection: "Highlight",
+    commentSelection: "Comment",
+    downloadAnnotated: "Download Annotated PDF",
     hideCollisions: "Hide Collisions",
     showCollisions: "Show Collisions",
     reset: "Reset",
@@ -169,6 +189,15 @@ const translations = {
     pageSingular: "page",
     pagePlural: "pages",
     pdfReadError: "Could not read that PDF. Try another file.",
+    copiedSelection: "Copied selected text.",
+    copyError: "Could not copy selected text.",
+    highlightAdded: "Highlight added.",
+    commentAdded: "Comment added.",
+    commentPrompt: "Comment for selected text:",
+    writingPdf: "Writing annotated PDF...",
+    annotatedPdfReady: "Annotated PDF downloaded.",
+    pdfWriteError: "Could not write annotations into that PDF.",
+    pdfLibMissing: "PDF annotation export is still loading. Try again in a moment.",
     pressKey: "Press a key",
     pressButton: "Press button",
   },
@@ -177,6 +206,10 @@ const translations = {
     tagline: "把晦涩的文章变成简单的平台关卡。",
     languageLabel: "语言",
     uploadPdf: "上传 PDF",
+    copySelection: "复制",
+    highlightSelection: "高亮",
+    commentSelection: "评论",
+    downloadAnnotated: "下载批注 PDF",
     hideCollisions: "隐藏碰撞",
     showCollisions: "显示碰撞",
     reset: "重置",
@@ -207,6 +240,15 @@ const translations = {
     pageSingular: "page",
     pagePlural: "pages",
     pdfReadError: "无法读取这个 PDF，请试试另一个文件。",
+    copiedSelection: "已复制选中的文字。",
+    copyError: "无法复制选中的文字。",
+    highlightAdded: "已添加高亮。",
+    commentAdded: "已添加评论。",
+    commentPrompt: "给选中文字添加评论：",
+    writingPdf: "正在写入批注 PDF...",
+    annotatedPdfReady: "已下载批注 PDF。",
+    pdfWriteError: "无法把批注写入这个 PDF。",
+    pdfLibMissing: "PDF 批注导出还在加载，请稍后再试。",
     pressKey: "按一个键",
     pressButton: "按一个按钮",
   },
@@ -261,6 +303,7 @@ function applyLanguage(language) {
   updatePageText();
   updateCollisionButtonLabel();
   updateControlLabels();
+  updateAnnotationControls();
 }
 
 function actionPressed(action) {
@@ -522,7 +565,7 @@ function measureTextSegmentRects(text, segments, fontHeight, style, totalTextWid
   return rects;
 }
 
-function splitTextIntoPlatforms(item, style, viewport, pageOffsetY, pageNumber) {
+function splitTextIntoPlatforms(item, style, viewport, pageOffsetY, pageNumber, textItemId) {
   const text = item.str || "";
   const segments = textSegments(text);
   if (!segments.some((segment) => !segment.isSeparator)) return [];
@@ -561,6 +604,11 @@ function splitTextIntoPlatforms(item, style, viewport, pageOffsetY, pageNumber) 
       width: Math.max(config.platformMinWidth, segmentWidth),
       height: fontHeight * 1.08,
       textHeight: fontHeight,
+      text: segment.text,
+      sourceText: text,
+      textStart: segment.start,
+      textEnd: segment.end,
+      textItemId,
       page: pageNumber,
       type: "text",
     };
@@ -659,31 +707,25 @@ function assignPlatformReadingOrder() {
     });
 }
 
-function clearTextSelection({ render = true } = {}) {
-  textSelection.anchorPlatform = null;
-  textSelection.startIndex = null;
-  textSelection.endIndex = null;
-  if (render) renderSelectionLayer();
+function hasTextSelection() {
+  return textSelection.startIndex !== null && textSelection.endIndex !== null;
 }
 
-function renderSelectionLayer() {
-  pdfDocument.querySelector(".selection-layer")?.remove();
-  if (!world.loaded || textSelection.startIndex === null || textSelection.endIndex === null) return;
-
+function selectedPlatforms() {
+  if (!hasTextSelection()) return [];
   const startIndex = Math.min(textSelection.startIndex, textSelection.endIndex);
   const endIndex = Math.max(textSelection.startIndex, textSelection.endIndex);
-  const selectedPlatforms = world.platforms.filter((platform) => (
+  return world.platforms.filter((platform) => (
     Number.isFinite(platform.readingIndex)
     && platform.readingIndex >= startIndex
     && platform.readingIndex <= endIndex
   ));
-  if (!selectedPlatforms.length) return;
+}
 
-  const layer = document.createElement("div");
-  layer.className = "selection-layer";
+function lineGroupsForPlatforms(platforms) {
   const lines = new Map();
 
-  for (const platform of selectedPlatforms) {
+  for (const platform of platforms) {
     const key = `${platform.page}:${platform.lineOrder ?? platform.lineId ?? platform.readingIndex}`;
     if (!lines.has(key)) {
       lines.set(key, {
@@ -695,22 +737,90 @@ function renderSelectionLayer() {
     lines.get(key).platforms.push(platform);
   }
 
-  const lineGroups = [...lines.values()].sort((a, b) => (
-    a.page - b.page || a.lineOrder - b.lineOrder
-  ));
+  return [...lines.values()]
+    .sort((a, b) => a.page - b.page || a.lineOrder - b.lineOrder)
+    .map((group) => ({
+      ...group,
+      platforms: group.platforms.sort((a, b) => a.x - b.x),
+    }));
+}
 
-  for (const group of lineGroups) {
-    const platforms = group.platforms.sort((a, b) => a.x - b.x);
-    const textHeight = Math.max(...platforms.map((platform) => platform.textHeight || world.minTextHeight));
+function rectsForLineGroups(lineGroups) {
+  return lineGroups.flatMap((group) => {
+    if (!group.platforms.length) return [];
+    const textHeight = Math.max(...group.platforms.map((platform) => platform.textHeight || world.minTextHeight));
     const paddingX = Math.max(1, textHeight * 0.07);
-    const left = Math.min(...platforms.map((platform) => platform.x));
-    const right = Math.max(...platforms.map((platform) => platform.x + platform.width));
-    const top = Math.min(...platforms.map((platform) => platform.y));
-    const bottom = Math.max(...platforms.map((platform) => platform.y + platform.height));
+    const left = Math.min(...group.platforms.map((platform) => platform.x));
+    const right = Math.max(...group.platforms.map((platform) => platform.x + platform.width));
+    const top = Math.min(...group.platforms.map((platform) => platform.y));
+    const bottom = Math.max(...group.platforms.map((platform) => platform.y + platform.height));
     const x = Math.max(0, left - paddingX);
     const width = Math.max(1, Math.min(world.cssWidth, right + paddingX) - x);
     const y = Math.max(0, top);
     const height = Math.max(2, bottom - y);
+    return [{
+      page: group.page,
+      x,
+      y,
+      width,
+      height,
+    }];
+  });
+}
+
+function selectedText() {
+  const lineGroups = lineGroupsForPlatforms(selectedPlatforms());
+  return lineGroups
+    .map((group) => {
+      let lineText = "";
+      group.platforms.forEach((platform, index) => {
+        lineText += platform.text || "";
+        const nextPlatform = group.platforms[index + 1];
+        if (!nextPlatform) return;
+        if (
+          platform.textItemId
+          && platform.textItemId === nextPlatform.textItemId
+          && platform.sourceText === nextPlatform.sourceText
+          && Number.isFinite(platform.textEnd)
+          && Number.isFinite(nextPlatform.textStart)
+        ) {
+          lineText += platform.sourceText.slice(platform.textEnd, nextPlatform.textStart);
+        } else {
+          lineText += " ";
+        }
+      });
+      return lineText.trim();
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function updateAnnotationControls() {
+  const canUseSelection = world.loaded && hasTextSelection();
+  copySelectionButton.disabled = !canUseSelection;
+  highlightSelectionButton.disabled = !canUseSelection;
+  commentSelectionButton.disabled = !canUseSelection;
+  downloadAnnotatedButton.disabled = !currentPdfBytes;
+}
+
+function clearTextSelection({ render = true } = {}) {
+  textSelection.anchorPlatform = null;
+  textSelection.startIndex = null;
+  textSelection.endIndex = null;
+  updateAnnotationControls();
+  if (render) renderSelectionLayer();
+}
+
+function renderSelectionLayer() {
+  pdfDocument.querySelector(".selection-layer")?.remove();
+  if (!world.loaded || !hasTextSelection()) return;
+
+  const selectionPlatforms = selectedPlatforms();
+  if (!selectionPlatforms.length) return;
+  const layer = document.createElement("div");
+  layer.className = "selection-layer";
+
+  for (const { x, y, width, height } of rectsForLineGroups(lineGroupsForPlatforms(selectionPlatforms))) {
     const highlight = document.createElement("div");
     highlight.className = "selection-highlight";
     highlight.style.transform = `translate(${x}px, ${y}px)`;
@@ -737,6 +847,290 @@ function updateTextSelection(platform) {
   }
 
   renderSelectionLayer();
+  updateAnnotationControls();
+}
+
+function createAnnotationId() {
+  return crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function addAnnotationFromSelection(comment = "") {
+  const selectionPlatforms = selectedPlatforms();
+  const rects = rectsForLineGroups(lineGroupsForPlatforms(selectionPlatforms));
+  if (!selectionPlatforms.length || !rects.length) return false;
+
+  world.annotations.push({
+    id: createAnnotationId(),
+    type: "highlight",
+    source: "session",
+    text: selectedText(),
+    comment: comment.trim(),
+    rects,
+    createdAt: new Date().toISOString(),
+  });
+  renderAnnotationLayer();
+  clearTextSelection();
+  return true;
+}
+
+function renderAnnotationLayer() {
+  pdfDocument.querySelector(".annotation-layer")?.remove();
+  if (!world.loaded || !world.annotations.length) return;
+
+  const layer = document.createElement("div");
+  layer.className = "annotation-layer";
+
+  for (const annotation of world.annotations) {
+    for (const rect of annotation.rects || []) {
+      const highlight = document.createElement("div");
+      highlight.className = "pdf-annotation-highlight";
+      highlight.classList.toggle("has-comment", Boolean(annotation.comment));
+      highlight.style.transform = `translate(${rect.x}px, ${rect.y}px)`;
+      highlight.style.width = `${rect.width}px`;
+      highlight.style.height = `${rect.height}px`;
+      if (annotation.comment) highlight.title = annotation.comment;
+      layer.append(highlight);
+    }
+  }
+
+  const selectionLayer = pdfDocument.querySelector(".selection-layer");
+  const collisionLayer = pdfDocument.querySelector(".collision-layer");
+  pdfDocument.insertBefore(layer, selectionLayer || collisionLayer || playerSprite);
+}
+
+function viewportRectToWorldRect(page, viewportRect) {
+  const [x1, y1, x2, y2] = viewportRect;
+  const left = Math.min(x1, x2) + page.x;
+  const top = Math.min(y1, y2) + page.y;
+  const right = Math.max(x1, x2) + page.x;
+  const bottom = Math.max(y1, y2) + page.y;
+  return {
+    page: page.number,
+    x: left,
+    y: top,
+    width: Math.max(1, right - left),
+    height: Math.max(1, bottom - top),
+  };
+}
+
+function pdfRectToWorldRect(page, rect) {
+  if (!Array.isArray(rect) || rect.length < 4) return null;
+  return viewportRectToWorldRect(page, page.viewport.convertToViewportRectangle(rect));
+}
+
+function flatQuadPoints(quadPoints) {
+  if (!quadPoints) return [];
+  if (ArrayBuffer.isView(quadPoints)) return Array.from(quadPoints);
+  if (!Array.isArray(quadPoints)) return [];
+
+  const values = [];
+  for (const item of quadPoints) {
+    if (typeof item === "number") {
+      values.push(item);
+    } else if (ArrayBuffer.isView(item)) {
+      values.push(...Array.from(item));
+    } else if (Array.isArray(item)) {
+      values.push(...flatQuadPoints(item));
+    } else if (item && Number.isFinite(item.x) && Number.isFinite(item.y)) {
+      values.push(item.x, item.y);
+    }
+  }
+  return values;
+}
+
+function quadPointsToWorldRects(page, quadPoints) {
+  const values = flatQuadPoints(quadPoints);
+  const rects = [];
+  for (let index = 0; index + 7 < values.length; index += 8) {
+    const viewportPoints = [
+      page.viewport.convertToViewportPoint(values[index], values[index + 1]),
+      page.viewport.convertToViewportPoint(values[index + 2], values[index + 3]),
+      page.viewport.convertToViewportPoint(values[index + 4], values[index + 5]),
+      page.viewport.convertToViewportPoint(values[index + 6], values[index + 7]),
+    ];
+    const xs = viewportPoints.map(([x]) => x);
+    const ys = viewportPoints.map(([, y]) => y);
+    rects.push(viewportRectToWorldRect(page, [
+      Math.min(...xs),
+      Math.min(...ys),
+      Math.max(...xs),
+      Math.max(...ys),
+    ]));
+  }
+  return rects;
+}
+
+function annotationText(value) {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (typeof value.str === "string") return value.str;
+  return "";
+}
+
+function isHighlightAnnotation(annotation) {
+  return annotation?.subtype === "Highlight" || annotation?.annotationType === 9;
+}
+
+function importPdfAnnotations() {
+  world.annotations = [];
+
+  for (const page of world.pages) {
+    for (const annotation of page.annotations || []) {
+      if (!isHighlightAnnotation(annotation)) continue;
+      const rects = quadPointsToWorldRects(page, annotation.quadPoints);
+      const fallbackRect = pdfRectToWorldRect(page, annotation.rect);
+      if (!rects.length && fallbackRect) rects.push(fallbackRect);
+      if (!rects.length) continue;
+
+      world.annotations.push({
+        id: annotation.id || createAnnotationId(),
+        type: "highlight",
+        source: "pdf",
+        text: "",
+        comment: annotationText(annotation.contentsObj) || annotationText(annotation.contents),
+        rects,
+        createdAt: annotation.modificationDate || "",
+      });
+    }
+  }
+}
+
+function pdfNumberArray(pdfDoc, values) {
+  const array = PDFArray.withContext(pdfDoc.context);
+  for (const value of values) {
+    array.push(PDFNumber.of(Number(value) || 0));
+  }
+  return array;
+}
+
+function pdfDateString(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return [
+    "D:",
+    date.getUTCFullYear(),
+    pad(date.getUTCMonth() + 1),
+    pad(date.getUTCDate()),
+    pad(date.getUTCHours()),
+    pad(date.getUTCMinutes()),
+    pad(date.getUTCSeconds()),
+    "Z",
+  ].join("");
+}
+
+function pageAnnotationArray(pdfDoc, page) {
+  let annots = page.node.lookup(PDFName.of("Annots"), PDFArray);
+  if (!annots) {
+    annots = PDFArray.withContext(pdfDoc.context);
+    page.node.set(PDFName.of("Annots"), annots);
+  }
+  return annots;
+}
+
+function worldRectToPdfQuad(page, rect) {
+  const left = rect.x - page.x;
+  const top = rect.y - page.y;
+  const right = left + rect.width;
+  const bottom = top + rect.height;
+  const topLeft = page.viewport.convertToPdfPoint(left, top);
+  const topRight = page.viewport.convertToPdfPoint(right, top);
+  const bottomLeft = page.viewport.convertToPdfPoint(left, bottom);
+  const bottomRight = page.viewport.convertToPdfPoint(right, bottom);
+  const points = [topLeft, topRight, bottomLeft, bottomRight];
+  const xs = points.map(([x]) => x);
+  const ys = points.map(([, y]) => y);
+
+  return {
+    rect: [
+      Math.min(...xs),
+      Math.min(...ys),
+      Math.max(...xs),
+      Math.max(...ys),
+    ],
+    quadPoints: points.flat(),
+  };
+}
+
+function addPdfHighlightAnnotation(pdfDoc, page, annotation) {
+  const now = pdfDateString();
+  const dict = pdfDoc.context.obj({
+    Type: PDFName.of("Annot"),
+    Subtype: PDFName.of("Highlight"),
+    Rect: pdfNumberArray(pdfDoc, annotation.rect),
+    QuadPoints: pdfNumberArray(pdfDoc, annotation.quadPoints),
+    C: pdfNumberArray(pdfDoc, [1, 0.84, 0]),
+    CA: PDFNumber.of(0.38),
+    F: PDFNumber.of(4),
+    T: PDFString.of("Blade of Readers"),
+    M: PDFString.of(now),
+    NM: PDFString.of(annotation.id),
+    Subj: PDFString.of("Highlight"),
+  });
+
+  if (annotation.comment) {
+    dict.set(PDFName.of("Contents"), PDFHexString.fromText(annotation.comment));
+  }
+
+  pageAnnotationArray(pdfDoc, page).push(pdfDoc.context.register(dict));
+}
+
+function annotationDownloadName() {
+  const baseName = currentPdfName.replace(/\.pdf$/iu, "");
+  return `${baseName || "document"}-annotated.pdf`;
+}
+
+function downloadBytes(bytes, name) {
+  const blob = new Blob([bytes], { type: "application/pdf" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function annotatedPdfBytes() {
+  if (!currentPdfBytes) return null;
+  const sessionAnnotations = world.annotations.filter((annotation) => annotation.source === "session");
+  if (!sessionAnnotations.length) return new Uint8Array(currentPdfBytes.slice(0));
+
+  if (!PDFDocument || !PDFName || !PDFNumber || !PDFArray || !PDFString || !PDFHexString) {
+    throw new Error("pdf-lib-missing");
+  }
+
+  const pdfDoc = await PDFDocument.load(currentPdfBytes.slice(0));
+  const pdfPages = pdfDoc.getPages();
+
+  for (const annotation of sessionAnnotations) {
+    const rectsByPage = new Map();
+    for (const rect of annotation.rects || []) {
+      if (!rectsByPage.has(rect.page)) rectsByPage.set(rect.page, []);
+      rectsByPage.get(rect.page).push(rect);
+    }
+
+    for (const [pageNumber, rects] of rectsByPage) {
+      const pageInfo = world.pages[pageNumber - 1];
+      const pdfPage = pdfPages[pageNumber - 1];
+      if (!pageInfo || !pdfPage) continue;
+
+      const quads = rects.map((rect) => worldRectToPdfQuad(pageInfo, rect));
+      const annotationRect = [
+        Math.min(...quads.map((quad) => quad.rect[0])),
+        Math.min(...quads.map((quad) => quad.rect[1])),
+        Math.max(...quads.map((quad) => quad.rect[2])),
+        Math.max(...quads.map((quad) => quad.rect[3])),
+      ];
+      addPdfHighlightAnnotation(pdfDoc, pdfPage, {
+        id: `BladeOfReaders-${annotation.id}-${pageNumber}`,
+        rect: annotationRect,
+        quadPoints: quads.flatMap((quad) => quad.quadPoints),
+        comment: annotation.comment,
+      });
+    }
+  }
+
+  return pdfDoc.save();
 }
 
 function attackDirection() {
@@ -926,12 +1320,17 @@ async function loadPdf(file) {
   world.loaded = false;
   playerSprite.hidden = true;
   dropZone.classList.add("is-hidden");
+  currentPdfBytes = null;
+  currentPdfName = file?.name || "annotated.pdf";
+  world.annotations = [];
+  updateAnnotationControls();
   clearTextSelection({ render: false });
   clearPdfDocument();
   setLoadingPdf(true);
   setStatus("readingPdf");
   const bytes = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+  currentPdfBytes = bytes.slice(0);
+  const pdf = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
   const firstPage = await pdf.getPage(1);
   const firstViewport = firstPage.getViewport({ scale: 1 });
   const availableWidth = Math.max(320, Math.min(1100, window.innerWidth - 36));
@@ -941,6 +1340,7 @@ async function loadPdf(file) {
   world.pages = [];
   world.platforms = [];
   world.portals = [];
+  world.annotations = [];
   world.activePlatformLineId = null;
   world.minTextHeight = Infinity;
 
@@ -958,12 +1358,17 @@ async function loadPdf(file) {
     const pageCtx = pageCanvas.getContext("2d");
     pageCtx.fillStyle = "#fff";
     pageCtx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
-    await page.render({ canvasContext: pageCtx, viewport }).promise;
+    const renderOptions = { canvasContext: pageCtx, viewport };
+    if (pdfjsLib.AnnotationMode?.DISABLE !== undefined) {
+      renderOptions.annotationMode = pdfjsLib.AnnotationMode.DISABLE;
+    }
+    await page.render(renderOptions).promise;
     pdfDocument.insertBefore(pageCanvas, playerSprite);
 
     const textContent = await page.getTextContent();
-    const pagePlatforms = textContent.items.flatMap((item) => (
-      splitTextIntoPlatforms(item, textContent.styles[item.fontName], viewport, offsetY, pageNumber)
+    const pageAnnotations = await page.getAnnotations({ intent: "display" });
+    const pagePlatforms = textContent.items.flatMap((item, itemIndex) => (
+      splitTextIntoPlatforms(item, textContent.styles[item.fontName], viewport, offsetY, pageNumber, `${pageNumber}:${itemIndex}`)
     ));
     for (const platform of pagePlatforms) {
       world.minTextHeight = Math.min(world.minTextHeight, platform.textHeight);
@@ -976,6 +1381,8 @@ async function loadPdf(file) {
       y: offsetY,
       width: viewport.width,
       height: viewport.height,
+      viewport,
+      annotations: pageAnnotations,
     });
     world.platforms.push(...pagePlatforms);
     offsetY += viewport.height + world.pageGap;
@@ -999,7 +1406,9 @@ async function loadPdf(file) {
   applyPhysicsScale();
   buildWrapPortals();
   assignPlatformReadingOrder();
+  importPdfAnnotations();
   renderCollisionLayer();
+  renderAnnotationLayer();
   renderSelectionLayer();
   resetPlayer();
   setLoadingPdf(false);
@@ -1010,6 +1419,7 @@ async function loadPdf(file) {
     total: pdf.numPages,
     pageWord: t(pdf.numPages === 1 ? "pageSingular" : "pagePlural"),
   });
+  updateAnnotationControls();
   autoCenterPlayer();
 }
 
@@ -1361,9 +1771,52 @@ async function handlePdfFile(file) {
     console.error(error);
     setLoadingPdf(false);
     world.loaded = false;
+    currentPdfBytes = null;
+    world.annotations = [];
+    updateAnnotationControls();
     playerSprite.hidden = true;
     setStatus("pdfReadError");
     dropZone.classList.remove("is-hidden");
+  }
+}
+
+async function copySelectedText() {
+  const text = selectedText();
+  if (!text) return;
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const textArea = document.createElement("textarea");
+      textArea.value = text;
+      textArea.style.position = "fixed";
+      textArea.style.left = "-10000px";
+      textArea.style.top = "0";
+      document.body.append(textArea);
+      textArea.select();
+      document.execCommand("copy");
+      textArea.remove();
+    }
+    setStatus("copiedSelection");
+  } catch (error) {
+    console.error(error);
+    setStatus("copyError");
+  }
+}
+
+async function downloadAnnotatedPdf() {
+  if (!currentPdfBytes) return;
+
+  try {
+    setStatus("writingPdf");
+    const bytes = await annotatedPdfBytes();
+    if (!bytes) return;
+    downloadBytes(bytes, annotationDownloadName());
+    setStatus("annotatedPdfReady");
+  } catch (error) {
+    console.error(error);
+    setStatus(error.message === "pdf-lib-missing" ? "pdfLibMissing" : "pdfWriteError");
   }
 }
 
@@ -1391,6 +1844,26 @@ resetButton.addEventListener("click", () => {
   clearTextSelection();
   resetPlayer();
   autoCenterPlayer();
+});
+
+copySelectionButton.addEventListener("click", () => {
+  copySelectedText();
+});
+
+highlightSelectionButton.addEventListener("click", () => {
+  if (!addAnnotationFromSelection()) return;
+  setStatus("highlightAdded");
+});
+
+commentSelectionButton.addEventListener("click", () => {
+  const comment = window.prompt(t("commentPrompt"), "");
+  if (comment === null) return;
+  if (!addAnnotationFromSelection(comment)) return;
+  setStatus("commentAdded");
+});
+
+downloadAnnotatedButton.addEventListener("click", () => {
+  downloadAnnotatedPdf();
 });
 
 collisionButton.addEventListener("click", () => {

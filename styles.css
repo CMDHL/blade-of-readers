@@ -159,6 +159,11 @@ button:hover {
   border-color: #aeb4c0;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
 .upload-button input {
   position: absolute;
   width: 1px;
@@ -274,12 +279,38 @@ button:hover {
   pointer-events: none;
 }
 
+.annotation-layer,
 .selection-layer {
   position: absolute;
   inset: 0;
-  z-index: 1;
   pointer-events: none;
   mix-blend-mode: multiply;
+}
+
+.annotation-layer {
+  z-index: 1;
+}
+
+.selection-layer {
+  z-index: 2;
+}
+
+.pdf-annotation-highlight {
+  position: absolute;
+  border-radius: 2px;
+  background: rgba(255, 209, 31, 0.4);
+}
+
+.pdf-annotation-highlight.has-comment::after {
+  content: "";
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #ba3b46;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.84);
 }
 
 .selection-highlight {
