@@ -134,6 +134,19 @@ p {
   justify-content: flex-end;
 }
 
+.actions .upload-button,
+.actions button,
+.actions .language-control select {
+  min-height: 34px;
+  padding: 0 10px;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.actions .language-control {
+  font-size: 0.78rem;
+}
+
 .upload-button,
 button,
 .language-control select {
@@ -251,6 +264,15 @@ button:disabled {
 }
 
 .control-row.is-interaction-ready button {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  box-shadow:
+    0 0 0 2px rgba(25, 118, 111, 0.16),
+    0 2px 0 rgba(23, 25, 31, 0.08);
+}
+
+.control-row.is-interaction-ready .fixed-control {
   border-color: var(--accent);
   background: var(--accent);
   color: #fff;
@@ -403,6 +425,28 @@ button:disabled {
   overflow: visible;
 }
 
+.quiz-prompt {
+  position: sticky;
+  top: calc(var(--sticky-topbar-height) + 8px);
+  z-index: 9;
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(25, 118, 111, 0.32);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--ink);
+  font-size: 0.95rem;
+  font-weight: 750;
+  line-height: 1.38;
+  overflow-wrap: anywhere;
+  box-shadow: 0 4px 14px rgba(26, 31, 44, 0.07);
+}
+
+.quiz-prompt[hidden] {
+  display: none;
+}
+
 .pdf-document {
   position: relative;
   width: 100%;
@@ -447,7 +491,8 @@ button:disabled {
 }
 
 .annotation-layer,
-.selection-layer {
+.selection-layer,
+.quiz-answer-layer {
   position: absolute;
   inset: 0;
   pointer-events: none;
@@ -459,6 +504,10 @@ button:disabled {
 }
 
 .selection-layer {
+  z-index: 2;
+}
+
+.quiz-answer-layer {
   z-index: 2;
 }
 
@@ -484,6 +533,13 @@ button:disabled {
   position: absolute;
   border-radius: 2px;
   background: rgba(0, 95, 255, 0.32);
+}
+
+.quiz-answer-highlight {
+  position: absolute;
+  border-radius: 2px;
+  background: rgba(217, 92, 48, 0.38);
+  outline: 1px solid rgba(151, 51, 21, 0.52);
 }
 
 .message-dialog-backdrop {
@@ -707,6 +763,75 @@ button:disabled {
   pointer-events: none;
   transform-origin: center;
   animation: blade-pop 150ms ease-out forwards;
+}
+
+.blade-swing.is-parry {
+  background: #fff;
+  border-color: #17191f;
+  box-shadow: 1px 1px 0 rgba(23, 25, 31, 0.22);
+}
+
+.quiz-enemy {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  width: 16px;
+  height: 16px;
+  border: 1px solid #17191f;
+  border-radius: 50%;
+  background: #64a6bd;
+  box-shadow:
+    inset -3px -3px 0 rgba(23, 25, 31, 0.12),
+    0 2px 0 rgba(23, 25, 31, 0.16);
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+
+.quiz-enemy.is-impacted {
+  background: #f2c14e;
+}
+
+.quiz-enemy.is-player-freeze {
+  background: #d95c30;
+}
+
+.quiz-enemy.is-parry-freeze {
+  background: #f2c14e;
+}
+
+.quiz-enemy.is-spawning {
+  animation: quiz-enemy-spawn 2000ms ease-out forwards;
+}
+
+.quiz-enemy.is-defeating {
+  animation: quiz-enemy-fade 1400ms ease-out forwards;
+}
+
+.quiz-enemy.is-paused {
+  animation-play-state: paused;
+}
+
+@keyframes quiz-enemy-fade {
+  0% {
+    opacity: 1;
+    transform: var(--quiz-enemy-transform) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: var(--quiz-enemy-transform) scale(1.55);
+  }
+}
+
+@keyframes quiz-enemy-spawn {
+  0% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 1;
+  }
 }
 
 @keyframes blade-pop {

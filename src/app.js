@@ -17,6 +17,8 @@ const resetButton = document.querySelector("#resetButton");
 const controlsPanel = document.querySelector("#controlsPanel");
 const collisionButton = document.querySelector("#collisionButton");
 const messageAnnotationsButton = document.querySelector("#messageAnnotationsButton");
+const quizPauseButton = document.querySelector("#quizPauseButton");
+const quizToggleButton = document.querySelector("#quizToggleButton");
 const languageSelect = document.querySelector("#languageSelect");
 const dropZone = document.querySelector("#dropZone");
 const loadingOverlay = document.querySelector("#loadingOverlay");
@@ -24,6 +26,7 @@ const statusText = document.querySelector("#statusText");
 const pageText = document.querySelector("#pageText");
 const messageDialog = document.querySelector("#messageDialog");
 const messageDialogText = document.querySelector("#messageDialogText");
+const quizPrompt = document.querySelector("#quizPrompt");
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_SRC;
 
@@ -40,24 +43,29 @@ const punctuationPattern = /[\s.,;:!?()[\]{}"'`~@#$%^&*_+=<>/\\|，。？！、�
 const textSegmentPattern = /[\s.,;:!?()[\]{}"'`~@#$%^&*_+=<>/\\|，。？！、；：（）【】《》“”‘’—…·「」『』]+|[^\s.,;:!?()[\]{}"'`~@#$%^&*_+=<>/\\|，。？！、；：（）【】《》“”‘’—…·「」『』]+/gu;
 const textMeasureContext = document.createElement("canvas").getContext("2d");
 const SPAWN_ANNOTATION_COMMENT = "[spawn]";
+const QUIZ_ANNOTATION_PREFIX = "[quiz]";
+const QUIZ_DEFEAT_FADE_MS = 1400;
+const QUIZ_SPAWN_FADE_MS = 2000;
 
 const keyMap = {
-  left: ["ArrowLeft", "KeyA"],
-  right: ["ArrowRight", "KeyD"],
-  up: ["ArrowUp", "KeyW"],
-  down: ["ArrowDown", "KeyS"],
-  jump: ["Space", "KeyZ"],
-  dash: ["ShiftLeft", "ShiftRight", "KeyC"],
+  left: ["ArrowLeft"],
+  right: ["ArrowRight"],
+  up: ["ArrowUp"],
+  down: ["ArrowDown"],
+  jump: ["KeyZ"],
+  dash: ["KeyC"],
   interact: ["KeyE"],
   attack: ["KeyX"],
-  copySelection: ["KeyV"],
-  highlightSelection: ["KeyH"],
-  commentSelection: ["KeyJ"],
+  parry: ["KeyS"],
+  copySelection: ["Digit1"],
+  highlightSelection: ["Digit2"],
+  commentSelection: ["Digit3"],
 };
 
 const controllerMap = {
   jump: [0],
   attack: [2],
+  parry: [5],
   dash: [7],
   interact: [1],
   menu: [8],
@@ -98,6 +106,7 @@ const world = {
   portals: [],
   annotations: [],
   messageAnnotations: [],
+  quizAnnotations: [],
   removedPdfAnnotations: [],
   loaded: false,
   renderWidth: 900,
@@ -143,6 +152,11 @@ const config = {
   dashDistance: 96,
   dashSpeed: 9.6,
   bladeDurationMs: 150,
+  parryDurationMs: 180,
+  quizEnemySpeed: 1.65,
+  quizEnemyImpactSpeed: 4.1,
+  quizPlayerKnockback: 14,
+  quizPlayerLift: 5.8,
 };
 
 const keys = new Set();
@@ -165,6 +179,8 @@ let remappingDevice = null;
 let controllerRemapBaseline = new Set();
 let collisionsVisible = false;
 let messageAnnotationsVisible = true;
+let quizEnemiesPaused = false;
+let quizzesEnabled = true;
 let autoScrollEnabled = true;
 let programmaticScrollUntil = 0;
 let currentLanguage = "en";
@@ -186,6 +202,7 @@ const textSelection = {
   endIndex: null,
 };
 let activeBladeSwing = null;
+let activeQuizEnemy = null;
 const teleportSuppressedPointerEvents = new WeakSet();
 
 const translations = {
@@ -197,13 +214,17 @@ const translations = {
     copySelection: "Copy",
     highlightSelection: "Highlight",
     commentSelection: "Comment",
-    downloadAnnotated: "Download Annotated PDF",
+    downloadAnnotated: "Export PDF",
     hideTopbar: "Hide Top",
     showTopbar: "Show Top",
-    hideCollisions: "Hide Collisions",
-    showCollisions: "Show Collisions",
-    hideMessages: "Hide Messages",
-    showMessages: "Show Messages",
+    hideCollisions: "Hide collider",
+    showCollisions: "Show collider",
+    hideMessages: "Hide msg",
+    showMessages: "Show msg",
+    pauseEnemies: "Pause",
+    resumeEnemies: "Continue",
+    disableQuiz: "Disable Quiz",
+    enableQuiz: "Enable Quiz",
     reset: "Reset",
     controlsLabel: "Key mapping",
     keyboardControls: "Keyboard",
@@ -218,6 +239,7 @@ const translations = {
     dash: "Dash",
     interact: "Interact",
     attack: "Attack",
+    parry: "Parry",
     menu: "Menu",
     annotationActions: "Actions",
     radialControl: "LB + right stick",
@@ -236,7 +258,7 @@ const translations = {
     readerStageLabel: "PDF platformer",
     dropTitle: "Upload a PDF to generate the level",
     dropDescription: "Words and punctuation-separated chunks become invisible platforms at the text itself.",
-    keysHelp: "Attack selects text. E or B opens messages. V/H/J or LB + right stick handles copy, highlight, and comment. Click entries to jump, attack in menu mode removes one.",
+    keysHelp: "Attack text to select, and parry on enemy attack to answer quiz questions. Attack entry in menu mode to removes annotations.",
     messageDialogTitle: "Message",
     closeMessage: "Close",
     goodMessage: "Good",
@@ -262,7 +284,7 @@ const translations = {
     commentAdded: "Comment added.",
     commentPrompt: "Comment for selected text:",
     writingPdf: "Writing annotated PDF...",
-    annotatedPdfReady: "Annotated PDF downloaded.",
+    annotatedPdfReady: "PDF exported.",
     pdfWriteError: "Could not write annotations into that PDF.",
     pdfLibMissing: "PDF annotation export is still loading. Try again in a moment.",
     pressKey: "Press a key",
@@ -276,13 +298,17 @@ const translations = {
     copySelection: "复制",
     highlightSelection: "高亮",
     commentSelection: "评论",
-    downloadAnnotated: "下载批注 PDF",
+    downloadAnnotated: "导出 PDF",
     hideTopbar: "隐藏顶部",
     showTopbar: "显示顶部",
     hideCollisions: "隐藏碰撞",
     showCollisions: "显示碰撞",
-    hideMessages: "隐藏消息",
-    showMessages: "显示消息",
+    hideMessages: "隐藏谏言",
+    showMessages: "显示谏言",
+    pauseEnemies: "暂停",
+    resumeEnemies: "继续",
+    disableQuiz: "关闭测验",
+    enableQuiz: "开启测验",
     reset: "重置",
     controlsLabel: "按键映射",
     keyboardControls: "键盘",
@@ -297,6 +323,7 @@ const translations = {
     dash: "冲刺",
     interact: "互动",
     attack: "攻击",
+    parry: "格挡",
     menu: "菜单",
     annotationActions: "操作",
     radialControl: "LB + 右摇杆",
@@ -315,12 +342,12 @@ const translations = {
     readerStageLabel: "PDF 平台关卡",
     dropTitle: "上传 PDF 生成关卡",
     dropDescription: "单词和由标点分隔的文本片段会在原文位置变成隐形平台。",
-    keysHelp: "攻击选择文字。E 或 B 打开消息。V/H/J 或 LB + 右摇杆可复制、高亮、评论。点击条目可跳转，攻击删除条目。",
-    messageDialogTitle: "消息",
+    keysHelp: "攻击文字以选中，格挡攻击以答题。菜单模式下，攻击侧栏条目以删除批注。",
+    messageDialogTitle: "谏言",
     closeMessage: "关闭",
     goodMessage: "赞同",
     badMessage: "反对",
-    messageOpened: "已打开消息。",
+    messageOpened: "已打开谏言。",
     messageChoiceSaved: "已记录{choice}回应。",
     messageChoiceGood: "赞同",
     messageChoiceBad: "反对",
@@ -341,7 +368,7 @@ const translations = {
     commentAdded: "已添加评论。",
     commentPrompt: "给选中文字添加评论：",
     writingPdf: "正在写入批注 PDF...",
-    annotatedPdfReady: "已下载批注 PDF。",
+    annotatedPdfReady: "已导出 PDF。",
     pdfWriteError: "无法把批注写入这个 PDF。",
     pdfLibMissing: "PDF 批注导出还在加载，请稍后再试。",
     pressKey: "按一个键",
@@ -381,6 +408,24 @@ function updateMessageAnnotationsButtonLabel() {
   messageAnnotationsButton.textContent = messageAnnotationsVisible ? t("hideMessages") : t("showMessages");
 }
 
+function updateQuizPauseButtonLabel() {
+  if (!quizPauseButton) return;
+  const key = quizEnemiesPaused ? "resumeEnemies" : "pauseEnemies";
+  const canPause = world.loaded && quizzesEnabled && world.quizAnnotations.length > 0;
+  quizPauseButton.dataset.i18n = key;
+  quizPauseButton.textContent = t(key);
+  quizPauseButton.setAttribute("aria-pressed", String(quizEnemiesPaused));
+  quizPauseButton.disabled = !canPause;
+}
+
+function updateQuizToggleButtonLabel() {
+  if (!quizToggleButton) return;
+  const key = quizzesEnabled ? "disableQuiz" : "enableQuiz";
+  quizToggleButton.dataset.i18n = key;
+  quizToggleButton.textContent = t(key);
+  quizToggleButton.setAttribute("aria-pressed", String(quizzesEnabled));
+}
+
 function updateTopbarToggleButton() {
   const key = topbarHidden ? "showTopbar" : "hideTopbar";
   topbarToggleButton.dataset.i18n = key;
@@ -417,6 +462,8 @@ function applyLanguage(language) {
   updatePageText();
   updateCollisionButtonLabel();
   updateMessageAnnotationsButtonLabel();
+  updateQuizPauseButtonLabel();
+  updateQuizToggleButtonLabel();
   updateTopbarToggleButton();
   updateControlLabels();
   updateAnnotationControls();
@@ -433,6 +480,7 @@ function actionPressed(action) {
 
 function formatKey(code) {
   if (code === "ShiftLeft" || code === "ShiftRight") return "Shift";
+  if (/^Digit\d$/u.test(code)) return code.replace("Digit", "");
   return code.replace("Arrow", "").replace("Key", "").replace("Space", "Space");
 }
 
@@ -505,6 +553,10 @@ function applyPhysicsScale() {
   config.dashDistance = 96 * config.scale;
   config.dashDuration = Math.max(6, Math.round(10 * Math.sqrt(config.scale)));
   config.dashSpeed = config.dashDistance / config.dashDuration;
+  config.quizEnemySpeed = 1.65 * config.scale;
+  config.quizEnemyImpactSpeed = 4.1 * config.scale;
+  config.quizPlayerKnockback = 14 * config.scale;
+  config.quizPlayerLift = 5.8 * config.scale;
 }
 
 function documentPageOffset() {
@@ -610,6 +662,7 @@ function resetPlayer() {
   player.dashFrames = 0;
   player.dashCooldown = 0;
   player.facingDirection = 1;
+  clearBladeSwing();
   if (spawnPlatform) world.activePlatformLineId = spawnPlatform.lineId || world.activePlatformLineId;
   autoScrollEnabled = true;
   renderPlayer();
@@ -1104,8 +1157,20 @@ function isSpawnAnnotation(annotation) {
   return isSpawnAnnotationComment(annotation?.comment);
 }
 
+function parseQuizAnnotationComment(comment) {
+  const text = String(comment || "");
+  if (!text.startsWith(QUIZ_ANNOTATION_PREFIX)) return null;
+  return {
+    prompt: text.slice(QUIZ_ANNOTATION_PREFIX.length).trim(),
+  };
+}
+
+function isQuizAnnotation(annotation) {
+  return Boolean(parseQuizAnnotationComment(annotation?.comment));
+}
+
 function isVisibleAnnotation(annotation) {
-  return !isSpawnAnnotation(annotation);
+  return !isSpawnAnnotation(annotation) && !isQuizAnnotation(annotation);
 }
 
 function visibleAnnotationEntries() {
@@ -1260,6 +1325,22 @@ function messageVoteChanged(annotation) {
   return annotation.messageChoice !== annotation.messageOriginalChoice;
 }
 
+function updateSelectionActionHint() {
+  const isReady = world.loaded && hasTextSelection() && !annotationMenuMode;
+  document.querySelectorAll([
+    '[data-map-action="copySelection"]',
+    '[data-map-action="highlightSelection"]',
+    '[data-map-action="commentSelection"]',
+  ].join(",")).forEach((button) => {
+    button.closest(".control-row")?.classList.toggle("is-interaction-ready", isReady);
+    button.setAttribute("aria-current", isReady ? "true" : "false");
+  });
+
+  document.querySelectorAll('[data-i18n="annotationActions"]').forEach((label) => {
+    label.closest(".control-row")?.classList.toggle("is-interaction-ready", isReady);
+  });
+}
+
 function selectedText() {
   return textFromPlatforms(selectedPlatforms());
 }
@@ -1270,6 +1351,7 @@ function updateAnnotationControls() {
     option.classList.toggle("is-disabled", !canUseSelection);
   });
   downloadAnnotatedButton.disabled = !currentPdfBytes;
+  updateSelectionActionHint();
 }
 
 function clearTextSelection({ render = true } = {}) {
@@ -1323,6 +1405,17 @@ function createAnnotationId() {
   return crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+function quizAnnotationFromBase(annotation, quiz) {
+  return {
+    ...annotation,
+    type: "quiz",
+    quizPrompt: quiz.prompt,
+    quizState: "pending",
+    quizDefeatStartedAt: 0,
+    quizFadeCompleteAt: 0,
+  };
+}
+
 function addAnnotationFromSelection(comment = "") {
   const selectionPlatforms = selectedPlatforms();
   const rects = rectsForLineGroups(lineGroupsForPlatforms(selectionPlatforms));
@@ -1341,6 +1434,17 @@ function addAnnotationFromSelection(comment = "") {
     sortOrder: nextAnnotationOrder,
     createdAt: new Date().toISOString(),
   };
+  const quiz = parseQuizAnnotationComment(annotation.comment);
+  if (quiz) {
+    world.quizAnnotations.push(quizAnnotationFromBase(annotation, quiz));
+    world.quizAnnotations.sort(compareAnnotationsByStart);
+    nextAnnotationOrder += 1;
+    clearTextSelection();
+    updateQuizPauseButtonLabel();
+    updateQuizGame();
+    return true;
+  }
+
   world.annotations.push(annotation);
   nextAnnotationOrder += 1;
   if (isSpawnAnnotation(annotation)) enforceUniqueSpawnAnnotation();
@@ -1490,12 +1594,14 @@ function renderAnnotationSidebar() {
 function setAnnotationMenuMode(isActive) {
   annotationMenuMode = isActive;
   if (annotationMenuMode) {
+    clearBladeSwing();
     player.vx = 0;
     player.vy = 0;
     player.jumpHeld = false;
     player.dropThrough = false;
   }
   clampSelectedAnnotationIndex();
+  updateAnnotationControls();
   renderAnnotationSidebar();
   if (annotationMenuMode) focusSelectedAnnotation();
   setStatus(annotationMenuMode ? "menuModeOn" : "menuModeOff");
@@ -1694,6 +1800,7 @@ function handleMessageDialogKey(code) {
 
 function openMessageDialog(annotation) {
   if (!annotation || !messageAnnotationsVisible) return false;
+  interruptParry();
   activeMessageAnnotationId = annotation.id;
   messageDialogChoiceIndex = annotation.messageChoice === "good"
     ? 1
@@ -1710,6 +1817,7 @@ function openMessageDialog(annotation) {
 }
 
 function openInteractableMessage() {
+  interruptParry();
   return openMessageDialog(interactableMessageAnnotation());
 }
 
@@ -1742,6 +1850,7 @@ function handleAnnotationMenuKey(code) {
 }
 
 async function performSelectionAction(action) {
+  interruptParry();
   if (!hasTextSelection()) return;
   if (action === "copySelection") {
     await copySelectedText();
@@ -1864,6 +1973,7 @@ function isHighlightAnnotation(annotation) {
 function importPdfAnnotations() {
   world.annotations = [];
   world.messageAnnotations = [];
+  world.quizAnnotations = [];
   nextAnnotationOrder = 0;
 
   for (const page of world.pages) {
@@ -1878,6 +1988,7 @@ function importPdfAnnotations() {
       const range = readingIndexRange(matchedPlatforms);
       const comment = annotationText(annotation.contentsObj) || annotationText(annotation.contents);
       const message = parseMessageAnnotationComment(comment);
+      const quiz = parseQuizAnnotationComment(comment);
       const importedAnnotation = {
         id: annotation.id || createAnnotationId(),
         source: "pdf",
@@ -1905,6 +2016,8 @@ function importPdfAnnotations() {
           messageChoice: message.choice,
           messageOriginalChoice: message.choice,
         });
+      } else if (quiz) {
+        world.quizAnnotations.push(quizAnnotationFromBase(importedAnnotation, quiz));
       } else {
         world.annotations.push({
           ...importedAnnotation,
@@ -1916,6 +2029,7 @@ function importPdfAnnotations() {
   }
   enforceUniqueSpawnAnnotation();
   world.messageAnnotations.sort(compareAnnotationsByStart);
+  world.quizAnnotations.sort(compareAnnotationsByStart);
 }
 
 function pdfNumberArray(pdfDoc, values) {
@@ -2209,7 +2323,7 @@ function downloadBytes(bytes, name) {
 async function annotatedPdfBytes(spawnPlatform = currentStandingPlatform()) {
   if (!currentPdfBytes) return null;
   const hasSpawnAnnotationUpdate = Boolean(spawnPlatform);
-  const sessionAnnotations = world.annotations.filter((annotation) => (
+  const sessionAnnotations = [...world.annotations, ...world.quizAnnotations].filter((annotation) => (
     annotation.source === "session"
     && (!hasSpawnAnnotationUpdate || !isSpawnAnnotation(annotation))
   ));
@@ -2287,9 +2401,15 @@ function attackDirection() {
     : { name: "right", x: 1, y: 0 };
 }
 
+function bladeDimensions() {
+  return {
+    length: Math.max(36, world.minTextHeight * 3.2, player.width * 3.4),
+    thickness: Math.max(8, world.minTextHeight * 0.8, player.height * 0.8),
+  };
+}
+
 function bladeHitbox(direction) {
-  const length = Math.max(36, world.minTextHeight * 3.2, player.width * 3.4);
-  const thickness = Math.max(8, world.minTextHeight * 0.8, player.height * 0.8);
+  const { length, thickness } = bladeDimensions();
   const gap = Math.max(2, world.minTextHeight * 0.12);
   const centerX = player.x + player.width / 2;
   const centerY = player.y + player.height / 2;
@@ -2326,6 +2446,59 @@ function bladeHitbox(direction) {
   };
 }
 
+function parryHitbox(direction) {
+  const { length, thickness } = bladeDimensions();
+  const overlap = Math.max(1, thickness * 0.35);
+  const centerX = player.x + player.width / 2;
+  const centerY = player.y + player.height / 2;
+
+  if (direction.x > 0) {
+    return {
+      x: player.x + player.width - overlap,
+      y: centerY - length / 2,
+      width: thickness,
+      height: length,
+    };
+  }
+  if (direction.x < 0) {
+    return {
+      x: player.x - thickness + overlap,
+      y: centerY - length / 2,
+      width: thickness,
+      height: length,
+    };
+  }
+  if (direction.y < 0) {
+    return {
+      x: centerX - length / 2,
+      y: player.y - thickness + overlap,
+      width: length,
+      height: thickness,
+    };
+  }
+  return {
+    x: centerX - length / 2,
+    y: player.y + player.height - overlap,
+    width: length,
+    height: thickness,
+  };
+}
+
+function activeBladeHitbox() {
+  if (!activeBladeSwing) return null;
+  return activeBladeSwing.kind === "parry"
+    ? parryHitbox(activeBladeSwing.direction)
+    : bladeHitbox(activeBladeSwing.direction);
+}
+
+function activeParryHitbox() {
+  return activeBladeSwing?.kind === "parry" ? activeBladeHitbox() : null;
+}
+
+function isParrying() {
+  return activeBladeSwing?.kind === "parry";
+}
+
 function distanceSquaredToRect(point, rect) {
   const closestX = Math.max(rect.x, Math.min(point.x, rect.x + rect.width));
   const closestY = Math.max(rect.y, Math.min(point.y, rect.y + rect.height));
@@ -2355,24 +2528,27 @@ function clearBladeSwing() {
 
 function renderBladeSwing() {
   if (!activeBladeSwing) return;
-  const hitbox = bladeHitbox(activeBladeSwing.direction);
+  const hitbox = activeBladeHitbox();
+  if (!hitbox) return;
   activeBladeSwing.element.style.transform = `translate(${hitbox.x}px, ${hitbox.y}px)`;
   activeBladeSwing.element.style.width = `${hitbox.width}px`;
   activeBladeSwing.element.style.height = `${hitbox.height}px`;
 }
 
-function showBlade(direction) {
+function showBlade(direction, kind = "attack") {
   clearBladeSwing();
   const blade = document.createElement("div");
   blade.className = `blade-swing blade-swing-${direction.name}`;
+  blade.classList.toggle("is-parry", kind === "parry");
   pdfDocument.append(blade);
   activeBladeSwing = {
     element: blade,
     direction,
+    kind,
     timeoutId: window.setTimeout(() => {
       if (activeBladeSwing?.element === blade) activeBladeSwing = null;
       blade.remove();
-    }, config.bladeDurationMs),
+    }, kind === "parry" ? config.parryDurationMs : config.bladeDurationMs),
   };
   renderBladeSwing();
 }
@@ -2445,6 +2621,7 @@ function renderActiveLineMarker(lineId) {
 
 function clearPdfDocument() {
   clearBladeSwing();
+  removeActiveQuizEnemy();
   pdfDocument.replaceChildren();
   pdfDocument.append(playerSprite);
 }
@@ -2463,6 +2640,7 @@ async function loadPdf(file) {
   currentPdfName = file?.name || "document.pdf";
   world.annotations = [];
   world.messageAnnotations = [];
+  world.quizAnnotations = [];
   world.removedPdfAnnotations = [];
   world.spawnPlatformReadingIndex = null;
   nextAnnotationOrder = 0;
@@ -2471,6 +2649,11 @@ async function loadPdf(file) {
   annotationRadialActive = false;
   annotationRadialChoice = null;
   activeMessageAnnotationId = null;
+  removeActiveQuizEnemy();
+  renderQuizPrompt(null);
+  renderQuizAnswerLayer();
+  updateQuizPauseButtonLabel();
+  updateQuizToggleButtonLabel();
   renderMessageDialog();
   renderAnnotationRadial();
   updateAnnotationControls();
@@ -2490,6 +2673,7 @@ async function loadPdf(file) {
   world.portals = [];
   world.annotations = [];
   world.messageAnnotations = [];
+  world.quizAnnotations = [];
   world.removedPdfAnnotations = [];
   world.spawnPlatformReadingIndex = null;
   nextAnnotationOrder = 0;
@@ -2572,11 +2756,15 @@ async function loadPdf(file) {
   buildWrapPortals();
   assignPlatformReadingOrder();
   importPdfAnnotations();
+  updateQuizPauseButtonLabel();
+  updateQuizToggleButtonLabel();
   renderCollisionLayer();
   renderAnnotationLayer();
   renderAnnotationSidebar();
   renderSelectionLayer();
   resetPlayer();
+  updateActivePage();
+  updateQuizGame();
   setLoadingPdf(false);
   playerSprite.hidden = false;
   updatePageText(1, pdf.numPages);
@@ -2671,7 +2859,359 @@ function activeWrapPortals() {
   });
 }
 
+function renderQuizPrompt(quiz) {
+  if (!quizPrompt) return;
+  quizPrompt.hidden = !quiz;
+  quizPrompt.textContent = quiz ? quiz.quizPrompt || "" : "";
+}
+
+function quizStartPage(quiz) {
+  const page = annotationStartLocation(quiz).page;
+  return Number.isFinite(page) ? page : annotationFirstPage(quiz);
+}
+
+function currentPageQuiz() {
+  if (!quizzesEnabled) return null;
+  return world.quizAnnotations
+    .filter((quiz) => quiz.quizState !== "defeated" && quizStartPage(quiz) === world.activePage)
+    .sort(compareAnnotationsByStart)[0] || null;
+}
+
+function quizAnswerRects(quiz) {
+  const rects = (quiz?.rects || []).filter(isWritableAnnotationRect);
+  if (rects.length) return rects;
+  return rectsForLineGroups(lineGroupsForPlatforms(annotationPlatforms(quiz)));
+}
+
+function renderQuizAnswerLayer() {
+  pdfDocument.querySelector(".quiz-answer-layer")?.remove();
+  if (!world.loaded || !quizzesEnabled) return;
+
+  const defeatingQuizzes = world.quizAnnotations.filter((quiz) => (
+    quiz.quizState === "defeating"
+    && quizStartPage(quiz) === world.activePage
+  ));
+  if (!defeatingQuizzes.length) return;
+
+  const layer = document.createElement("div");
+  layer.className = "quiz-answer-layer";
+  for (const quiz of defeatingQuizzes) {
+    for (const rect of quizAnswerRects(quiz)) {
+      const highlight = document.createElement("div");
+      highlight.className = "quiz-answer-highlight";
+      highlight.style.transform = `translate(${rect.x}px, ${rect.y}px)`;
+      highlight.style.width = `${rect.width}px`;
+      highlight.style.height = `${rect.height}px`;
+      layer.append(highlight);
+    }
+  }
+
+  pdfDocument.insertBefore(layer, playerSprite);
+}
+
+function removeActiveQuizEnemy() {
+  activeQuizEnemy?.element?.remove();
+  activeQuizEnemy = null;
+}
+
+function quizEnemySize() {
+  return Math.max(player.width, player.height, world.minTextHeight * 1.05, 12);
+}
+
+function quizEnemyRect(enemy = activeQuizEnemy) {
+  if (!enemy) return null;
+  return {
+    x: enemy.x,
+    y: enemy.y,
+    width: enemy.size,
+    height: enemy.size,
+  };
+}
+
+function setQuizEnemyTransform(enemy) {
+  if (!enemy?.element) return;
+  const now = performance.now();
+  const isFrozenOrImpacted = now < enemy.freezeUntil || now < enemy.impactUntil;
+  const transform = `translate(${enemy.x}px, ${enemy.y}px)`;
+  enemy.element.style.setProperty("--quiz-enemy-transform", transform);
+  enemy.element.style.transform = transform;
+  enemy.element.style.width = `${enemy.size}px`;
+  enemy.element.style.height = `${enemy.size}px`;
+  enemy.element.classList.toggle("is-impacted", now < enemy.impactUntil);
+  enemy.element.classList.toggle("is-player-freeze", isFrozenOrImpacted && enemy.freezeSource === "player");
+  enemy.element.classList.toggle("is-parry-freeze", isFrozenOrImpacted && enemy.freezeSource === "parry");
+  enemy.element.classList.toggle("is-spawning", now < enemy.spawnUntil);
+  enemy.element.classList.toggle("is-paused", quizEnemiesPaused);
+}
+
+function quizSpawnPoint(quiz, size) {
+  const page = world.pages[quizStartPage(quiz) - 1] || world.pages[world.activePage - 1];
+  const center = playerCenter();
+  const radius = Math.max(140 * config.scale, player.width * 10, world.minTextHeight * 8);
+  const minX = page?.x || 0;
+  const minY = page?.y || 0;
+  const maxX = Math.max(minX, (page ? page.x + page.width : world.cssWidth) - size);
+  const maxY = Math.max(minY, (page ? page.y + page.height : world.cssHeight) - size);
+  const pointForAngle = (angle) => ({
+    x: center.x + Math.cos(angle) * radius - size / 2,
+    y: center.y + Math.sin(angle) * radius - size / 2,
+  });
+  const withinBounds = (point) => point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY;
+  const clampToBounds = (point) => ({
+    x: Math.max(minX, Math.min(maxX, point.x)),
+    y: Math.max(minY, Math.min(maxY, point.y)),
+  });
+
+  const baseAngle = Math.random() * Math.PI * 2;
+  for (let index = 0; index < 36; index += 1) {
+    const point = pointForAngle(baseAngle + index * (Math.PI * 2 / 36));
+    if (withinBounds(point)) return point;
+  }
+
+  return clampToBounds(pointForAngle(baseAngle));
+}
+
+function createQuizEnemy(quiz) {
+  const size = quizEnemySize();
+  const spawn = quizSpawnPoint(quiz, size);
+  const element = document.createElement("div");
+  element.className = "quiz-enemy";
+  pdfDocument.append(element);
+  activeQuizEnemy = {
+    quizId: quiz.id,
+    element,
+    x: spawn.x,
+    y: spawn.y,
+    size,
+    impactX: 0,
+    impactY: 0,
+    impactStartX: 0,
+    impactStartY: 0,
+    impactStartAt: 0,
+    impactDurationMs: 320,
+    impactDistance: 0,
+    impactUntil: 0,
+    freezeUntil: 0,
+    freezeSource: null,
+    spawnUntil: performance.now() + QUIZ_SPAWN_FADE_MS,
+    lastPlayerHitAt: 0,
+    lastParryHitAt: 0,
+  };
+  if (quiz.quizState === "defeating") element.classList.add("is-defeating");
+  setQuizEnemyTransform(activeQuizEnemy);
+  return activeQuizEnemy;
+}
+
+function ensureQuizEnemy(quiz) {
+  if (activeQuizEnemy?.quizId !== quiz.id) {
+    removeActiveQuizEnemy();
+  }
+  return activeQuizEnemy || createQuizEnemy(quiz);
+}
+
+function normalizedVector(from, to, fallback = { x: 1, y: 0 }) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const distance = Math.hypot(dx, dy);
+  if (distance <= 0.0001) return fallback;
+  return {
+    x: dx / distance,
+    y: dy / distance,
+  };
+}
+
+function enemyCenter(enemy) {
+  return {
+    x: enemy.x + enemy.size / 2,
+    y: enemy.y + enemy.size / 2,
+  };
+}
+
+function playerCenter() {
+  return {
+    x: player.x + player.width / 2,
+    y: player.y + player.height / 2,
+  };
+}
+
+function pushEnemyAwayFromPlayer(enemy, freezeMs, now) {
+  const away = normalizedVector(playerCenter(), enemyCenter(enemy), { x: -player.facingDirection || -1, y: 0 });
+  const durationMs = 320;
+  enemy.impactX = away.x;
+  enemy.impactY = away.y;
+  enemy.impactStartX = enemy.x;
+  enemy.impactStartY = enemy.y;
+  enemy.impactStartAt = now;
+  enemy.impactDurationMs = durationMs;
+  enemy.impactDistance = config.quizEnemyImpactSpeed * (durationMs / (1000 / 60));
+  enemy.impactUntil = now + durationMs;
+  enemy.freezeSource = "parry";
+  enemy.freezeUntil = Math.max(enemy.freezeUntil || 0, enemy.impactUntil + freezeMs);
+  setQuizEnemyTransform(enemy);
+}
+
+function freezeEnemy(enemy, freezeMs, now) {
+  enemy.impactUntil = 0;
+  enemy.freezeSource = "player";
+  enemy.freezeUntil = Math.max(enemy.freezeUntil || 0, now + freezeMs);
+  setQuizEnemyTransform(enemy);
+}
+
+function finishEnemyImpact(enemy) {
+  if (!enemy.impactUntil) return;
+  enemy.x = Math.max(0, Math.min(world.cssWidth - enemy.size, enemy.impactStartX + enemy.impactX * enemy.impactDistance));
+  enemy.y = Math.max(0, Math.min(world.cssHeight - enemy.size, enemy.impactStartY + enemy.impactY * enemy.impactDistance));
+  enemy.impactUntil = 0;
+}
+
+function applyQuizPlayerHit(enemy, now) {
+  if (now - enemy.lastPlayerHitAt < 320) return false;
+  const push = normalizedVector(enemyCenter(enemy), playerCenter(), { x: player.facingDirection || 1, y: 0 });
+  const horizontal = Math.abs(push.x) < 0.18 ? (player.x >= enemy.x ? 1 : -1) : push.x;
+  player.vx = horizontal * config.quizPlayerKnockback;
+  player.vy = Math.min(player.vy, -config.quizPlayerLift);
+  player.grounded = false;
+  player.groundedByViewport = false;
+  enemy.lastPlayerHitAt = now;
+  return true;
+}
+
+function quizAnswerOverlapsSelection(quiz) {
+  return selectedPlatforms().some((platform) => annotationIncludesPlatform(quiz, platform));
+}
+
+function defeatQuizEnemy(quiz, enemy, now) {
+  if (quiz.quizState !== "pending") return;
+  quiz.quizState = "defeating";
+  quiz.quizDefeatStartedAt = now;
+  quiz.quizFadeCompleteAt = now + QUIZ_DEFEAT_FADE_MS;
+  enemy.element.classList.add("is-defeating");
+  setQuizEnemyTransform(enemy);
+  renderQuizAnswerLayer();
+}
+
+function finishQuizDefeatFades(now) {
+  let changed = false;
+  for (const quiz of world.quizAnnotations) {
+    if (quiz.quizState !== "defeating" || now < quiz.quizFadeCompleteAt) continue;
+    quiz.quizState = "defeated";
+    if (activeQuizEnemy?.quizId === quiz.id) removeActiveQuizEnemy();
+    changed = true;
+  }
+  if (changed) renderQuizAnswerLayer();
+}
+
+function updateQuizEnemy(quiz, enemy, now) {
+  if (quiz.quizState === "defeating") {
+    setQuizEnemyTransform(enemy);
+    return;
+  }
+
+  if (now < enemy.spawnUntil) {
+    setQuizEnemyTransform(enemy);
+    return;
+  }
+
+  if (now < enemy.impactUntil) {
+    const progress = Math.max(0, Math.min(1, (now - enemy.impactStartAt) / enemy.impactDurationMs));
+    const eased = 1 - (1 - progress) ** 2;
+    enemy.x = Math.max(0, Math.min(world.cssWidth - enemy.size, enemy.impactStartX + enemy.impactX * enemy.impactDistance * eased));
+    enemy.y = Math.max(0, Math.min(world.cssHeight - enemy.size, enemy.impactStartY + enemy.impactY * enemy.impactDistance * eased));
+    setQuizEnemyTransform(enemy);
+    return;
+  }
+  finishEnemyImpact(enemy);
+
+  if (now < enemy.freezeUntil) {
+    setQuizEnemyTransform(enemy);
+    return;
+  }
+
+  const chase = normalizedVector(enemyCenter(enemy), playerCenter(), { x: 1, y: 0 });
+  enemy.x = Math.max(0, Math.min(world.cssWidth - enemy.size, enemy.x + chase.x * config.quizEnemySpeed));
+  enemy.y = Math.max(0, Math.min(world.cssHeight - enemy.size, enemy.y + chase.y * config.quizEnemySpeed));
+
+  const enemyRect = quizEnemyRect(enemy);
+  const parryHitbox = activeParryHitbox();
+  const hitPlayer = rectsOverlap(enemyRect, player);
+  const hitParry = parryHitbox && rectsOverlap(enemyRect, parryHitbox);
+  const playerBounced = hitPlayer ? applyQuizPlayerHit(enemy, now) : false;
+
+  if (hitParry && now - enemy.lastParryHitAt >= 120) {
+    pushEnemyAwayFromPlayer(enemy, 5000, now);
+    enemy.lastParryHitAt = now;
+    if (quizAnswerOverlapsSelection(quiz)) {
+      defeatQuizEnemy(quiz, enemy, now);
+    }
+  } else if (playerBounced) {
+    freezeEnemy(enemy, 2000, now);
+  }
+
+  setQuizEnemyTransform(enemy);
+}
+
+function resetQuizState() {
+  for (const quiz of world.quizAnnotations) {
+    quiz.quizState = "pending";
+    quiz.quizDefeatStartedAt = 0;
+    quiz.quizFadeCompleteAt = 0;
+  }
+  removeActiveQuizEnemy();
+  renderQuizAnswerLayer();
+  renderQuizPrompt(null);
+}
+
+function setQuizEnemiesPaused(isPaused) {
+  quizEnemiesPaused = isPaused;
+  updateQuizPauseButtonLabel();
+  if (activeQuizEnemy) setQuizEnemyTransform(activeQuizEnemy);
+}
+
+function setQuizzesEnabled(isEnabled) {
+  quizzesEnabled = isEnabled;
+  quizEnemiesPaused = false;
+  updateQuizToggleButtonLabel();
+  updateQuizPauseButtonLabel();
+  if (!quizzesEnabled) {
+    removeActiveQuizEnemy();
+    renderQuizPrompt(null);
+    renderQuizAnswerLayer();
+    return;
+  }
+  updateQuizGame();
+}
+
+function updateQuizGame(now = performance.now()) {
+  if (!world.loaded || !quizzesEnabled) {
+    removeActiveQuizEnemy();
+    renderQuizPrompt(null);
+    renderQuizAnswerLayer();
+    return;
+  }
+
+  if (!quizEnemiesPaused) finishQuizDefeatFades(now);
+  const quiz = currentPageQuiz();
+  renderQuizPrompt(quiz);
+  renderQuizAnswerLayer();
+  if (!quiz) {
+    removeActiveQuizEnemy();
+    return;
+  }
+
+  const enemy = ensureQuizEnemy(quiz);
+  if (quizEnemiesPaused) {
+    setQuizEnemyTransform(enemy);
+    return;
+  }
+  updateQuizEnemy(quiz, enemy, now);
+}
+
+function interruptParry() {
+  if (isParrying()) clearBladeSwing();
+}
+
 function startJump() {
+  interruptParry();
   if (actionPressed("down") && (player.grounded || player.coyote > 0)) {
     player.dropThrough = true;
     player.jumpHeld = true;
@@ -2693,6 +3233,7 @@ function startJump() {
 }
 
 function startDash() {
+  interruptParry();
   if (player.dashFrames > 0 || player.dashCooldown > 0) return;
   const direction = actionPressed("left") && !actionPressed("right")
     ? -1
@@ -2711,6 +3252,7 @@ function startDash() {
 
 function startAttack() {
   if (!world.loaded) return;
+  interruptParry();
   const direction = attackDirection();
   if (direction.x !== 0) player.facingDirection = direction.x;
   const hitbox = bladeHitbox(direction);
@@ -2721,6 +3263,18 @@ function startAttack() {
   } else {
     clearTextSelection();
   }
+  renderPlayer();
+}
+
+function startParry() {
+  if (!world.loaded) return;
+  const direction = attackDirection();
+  if (direction.x !== 0) player.facingDirection = direction.x;
+  player.vx = 0;
+  player.dashFrames = 0;
+  player.jumpHeld = false;
+  player.dropThrough = false;
+  showBlade(direction, "parry");
   renderPlayer();
 }
 
@@ -2876,8 +3430,9 @@ function updateActivePage() {
 }
 
 function updatePlayer() {
-  const movingLeft = actionPressed("left");
-  const movingRight = actionPressed("right");
+  const parryActive = isParrying();
+  const movingLeft = !parryActive && actionPressed("left");
+  const movingRight = !parryActive && actionPressed("right");
   const isDashing = player.dashFrames > 0;
 
   if (movingLeft && !movingRight) player.facingDirection = -1;
@@ -2888,9 +3443,13 @@ function updatePlayer() {
     player.vy = 0;
     player.dashFrames -= 1;
   } else {
-    if (movingLeft) player.vx -= config.acceleration;
-    if (movingRight) player.vx += config.acceleration;
-    if (!movingLeft && !movingRight) player.vx *= config.friction;
+    if (parryActive) {
+      player.vx = 0;
+    } else {
+      if (movingLeft) player.vx -= config.acceleration;
+      if (movingRight) player.vx += config.acceleration;
+      if (!movingLeft && !movingRight) player.vx *= config.friction;
+    }
     player.vx = Math.max(-config.moveSpeed, Math.min(config.moveSpeed, player.vx));
 
     player.vy = Math.min(config.maxFall, player.vy + config.gravity);
@@ -3002,9 +3561,11 @@ function teleportPlayerToClick(event) {
   player.coyote = 0;
   player.dashFrames = 0;
   player.dashCooldown = 0;
+  clearBladeSwing();
   world.activePlatformLineId = clickedPlatform.lineId || world.activePlatformLineId;
   restartAutoScroll();
   updateActivePage();
+  updateQuizGame();
   renderPlayer();
 }
 
@@ -3065,6 +3626,8 @@ function updateControllerInput() {
     const jumpWasPressed = controllerMap.jump.some((button) => previousControllerButtons.has(button));
     const attackPressed = controllerMap.attack.some((button) => controllerButtons.has(button));
     const attackWasPressed = controllerMap.attack.some((button) => previousControllerButtons.has(button));
+    const parryPressed = controllerMap.parry.some((button) => controllerButtons.has(button));
+    const parryWasPressed = controllerMap.parry.some((button) => previousControllerButtons.has(button));
     const dashPressed = controllerMap.dash.some((button) => controllerButtons.has(button));
     const dashWasPressed = controllerMap.dash.some((button) => previousControllerButtons.has(button));
     const interactPressed = controllerMap.interact.some((button) => controllerButtons.has(button));
@@ -3119,6 +3682,10 @@ function updateControllerInput() {
       return;
     }
 
+    if (parryPressed && !parryWasPressed) {
+      restartAutoScroll();
+      startParry();
+    }
     if (jumpPressed && !jumpWasPressed) {
       restartAutoScroll();
       startJump();
@@ -3146,7 +3713,10 @@ function updateControllerInput() {
 
 function tick() {
   updateControllerInput();
-  if (world.loaded && !annotationMenuMode && !activeMessageAnnotationId) updatePlayer();
+  if (world.loaded && !annotationMenuMode && !activeMessageAnnotationId) {
+    updatePlayer();
+    updateQuizGame();
+  }
   renderPlayer();
   requestAnimationFrame(tick);
 }
@@ -3162,6 +3732,7 @@ async function handlePdfFile(file) {
     currentPdfBytes = null;
     world.annotations = [];
     world.messageAnnotations = [];
+    world.quizAnnotations = [];
     world.removedPdfAnnotations = [];
     world.spawnPlatformReadingIndex = null;
     nextAnnotationOrder = 0;
@@ -3170,6 +3741,11 @@ async function handlePdfFile(file) {
     annotationRadialActive = false;
     annotationRadialChoice = null;
     activeMessageAnnotationId = null;
+    removeActiveQuizEnemy();
+    renderQuizPrompt(null);
+    renderQuizAnswerLayer();
+    updateQuizPauseButtonLabel();
+    updateQuizToggleButtonLabel();
     renderMessageDialog();
     renderAnnotationRadial();
     updateAnnotationControls();
@@ -3244,7 +3820,10 @@ dropZone.addEventListener("drop", async (event) => {
 resetButton.addEventListener("click", () => {
   closeMessageDialog();
   clearTextSelection();
+  resetQuizState();
   resetPlayer();
+  updateActivePage();
+  updateQuizGame();
   autoCenterPlayer();
 });
 
@@ -3277,6 +3856,14 @@ messageAnnotationsButton.addEventListener("click", () => {
   if (!messageAnnotationsVisible) closeMessageDialog();
   renderAnnotationLayer();
   renderPlayer();
+});
+
+quizPauseButton?.addEventListener("click", () => {
+  setQuizEnemiesPaused(!quizEnemiesPaused);
+});
+
+quizToggleButton?.addEventListener("click", () => {
+  setQuizzesEnabled(!quizzesEnabled);
 });
 
 messageDialog?.addEventListener("click", (event) => {
@@ -3347,6 +3934,7 @@ window.addEventListener("keydown", (event) => {
   }
 
   if (isControlKey) restartAutoScroll();
+  if (!wasPressed && keyMap.parry.includes(event.code)) startParry();
   if (!wasPressed && keyMap.jump.includes(event.code)) startJump();
   if (!wasPressed && keyMap.dash.includes(event.code)) startDash();
   if (!wasPressed && keyMap.attack.includes(event.code)) startAttack();

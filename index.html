@@ -35,6 +35,8 @@
             <button id="downloadAnnotatedButton" type="button" data-i18n="downloadAnnotated" disabled>Download Annotated PDF</button>
             <button id="collisionButton" type="button" aria-pressed="false" data-i18n="showCollisions">Show Collisions</button>
             <button id="messageAnnotationsButton" type="button" aria-pressed="true" data-i18n="hideMessages">Hide Messages</button>
+            <button id="quizToggleButton" type="button" aria-pressed="true" data-i18n="disableQuiz">Disable Quiz</button>
+            <button id="quizPauseButton" type="button" aria-pressed="false" data-i18n="pauseEnemies" disabled>Pause</button>
             <button id="resetButton" type="button" data-i18n="reset">Reset</button>
           </div>
         </div>
@@ -65,6 +67,10 @@
             <div class="control-row">
               <span data-i18n="attack">Attack</span>
               <button type="button" data-map-device="keyboard" data-map-action="attack"></button>
+            </div>
+            <div class="control-row">
+              <span data-i18n="parry">Parry</span>
+              <button type="button" data-map-device="keyboard" data-map-action="parry"></button>
             </div>
             <div class="control-row">
               <span data-i18n="dash">Dash</span>
@@ -103,6 +109,10 @@
               <button type="button" data-map-device="controller" data-map-action="attack"></button>
             </div>
             <div class="control-row">
+              <span data-i18n="parry">Parry</span>
+              <button type="button" data-map-device="controller" data-map-action="parry"></button>
+            </div>
+            <div class="control-row">
               <span data-i18n="dash">Dash</span>
               <button type="button" data-map-device="controller" data-map-action="dash"></button>
             </div>
@@ -132,6 +142,7 @@
         </aside>
 
         <section class="reader-stage" aria-label="PDF platformer" data-i18n-attr="aria-label:readerStageLabel">
+          <div id="quizPrompt" class="quiz-prompt" aria-live="polite" hidden></div>
           <div id="pdfDocument" class="pdf-document"></div>
           <div id="playerSprite" class="player-sprite" aria-hidden="true">
             <span></span>
@@ -143,7 +154,7 @@
           <div id="dropZone" class="drop-zone">
             <strong data-i18n="dropTitle">Upload a PDF to generate the level</strong>
             <span data-i18n="dropDescription">Words and punctuation-separated chunks become invisible platforms at the text itself.</span>
-            <span class="keys" data-i18n="keysHelp">Attack selects text · E interacts · V/H/J copy, highlight, comment · Click entries to jump</span>
+            <span class="keys" data-i18n="keysHelp">Attack selects text · S parries · E interacts · 1/2/3 copy, highlight, comment · Click entries to jump</span>
           </div>
         </section>
       </div>
