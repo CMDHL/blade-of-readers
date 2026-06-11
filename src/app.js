@@ -39,6 +39,7 @@ const {
 const punctuationPattern = /[\s.,;:!?()[\]{}"'`~@#$%^&*_+=<>/\\|，。？！、；：（）【】《》“”‘’—…·「」『』]+/u;
 const textSegmentPattern = /[\s.,;:!?()[\]{}"'`~@#$%^&*_+=<>/\\|，。？！、；：（）【】《》“”‘’—…·「」『』]+|[^\s.,;:!?()[\]{}"'`~@#$%^&*_+=<>/\\|，。？！、；：（）【】《》“”‘’—…·「」『』]+/gu;
 const textMeasureContext = document.createElement("canvas").getContext("2d");
+const SPAWN_ANNOTATION_COMMENT = "[spawn]";
 
 const keyMap = {
   left: ["ArrowLeft", "KeyA"],
@@ -105,6 +106,7 @@ const world = {
   activePage: 1,
   activePlatformLineId: null,
   renderedActivePlatformLineId: null,
+  spawnPlatformReadingIndex: null,
 };
 
 const player = {
@@ -587,12 +589,19 @@ function autoCenterPlayer() {
 }
 
 function resetPlayer() {
+  const spawnPlatform = platformAtReadingIndex(world.spawnPlatformReadingIndex);
   const firstPlatform = world.platforms.find((platform) => platform.page === 1);
-  player.x = firstPlatform ? firstPlatform.x : 72;
-  player.y = firstPlatform ? Math.max(0, firstPlatform.y - player.height - 4) : 80;
+  const startPlatform = spawnPlatform || firstPlatform;
+  const x = spawnPlatform
+    ? spawnPlatform.x + spawnPlatform.width / 2 - player.width / 2
+    : startPlatform?.x;
+  player.x = startPlatform ? Math.max(0, Math.min(world.cssWidth - player.width, x)) : 72;
+  player.y = startPlatform
+    ? Math.max(0, startPlatform.y - player.height - (spawnPlatform ? 0 : 4))
+    : 80;
   player.vx = 0;
   player.vy = 0;
-  player.grounded = false;
+  player.grounded = Boolean(spawnPlatform);
   player.groundedByViewport = false;
   player.jumpHeld = false;
   player.jumpFrames = 0;
@@ -601,6 +610,7 @@ function resetPlayer() {
   player.dashFrames = 0;
   player.dashCooldown = 0;
   player.facingDirection = 1;
+  if (spawnPlatform) world.activePlatformLineId = spawnPlatform.lineId || world.activePlatformLineId;
   autoScrollEnabled = true;
   renderPlayer();
 }
@@ -1086,6 +1096,113 @@ function sortAnnotationsByStart(preserveId = null) {
   }
 }
 
+function isSpawnAnnotationComment(comment) {
+  return comment === SPAWN_ANNOTATION_COMMENT;
+}
+
+function isSpawnAnnotation(annotation) {
+  return isSpawnAnnotationComment(annotation?.comment);
+}
+
+function isVisibleAnnotation(annotation) {
+  return !isSpawnAnnotation(annotation);
+}
+
+function visibleAnnotationEntries() {
+  return world.annotations
+    .map((annotation, index) => ({ annotation, index }))
+    .filter(({ annotation }) => isVisibleAnnotation(annotation));
+}
+
+function markPdfAnnotationForRemoval(annotation) {
+  if (annotation?.source !== "pdf") return;
+
+  const removal = {
+    page: annotation.pdfPage || annotationFirstPage(annotation),
+    id: annotation.pdfId || annotation.id || "",
+    rect: annotation.pdfRect || [],
+    quadPoints: annotation.pdfQuadPoints || [],
+  };
+  const alreadyMarked = world.removedPdfAnnotations.some((item) => (
+    item.page === removal.page
+    && (
+      (removal.id && item.id === removal.id)
+      || nearlyEqualNumberArray(item.rect, removal.rect)
+      || nearlyEqualNumberArray(item.quadPoints, removal.quadPoints)
+    )
+  ));
+  if (!alreadyMarked) world.removedPdfAnnotations.push(removal);
+}
+
+function syncSpawnPlatformFromAnnotations() {
+  const spawnAnnotation = world.annotations.find(isSpawnAnnotation);
+  const platform = annotationStartPlatform(spawnAnnotation);
+  world.spawnPlatformReadingIndex = Number.isFinite(platform?.readingIndex)
+    ? platform.readingIndex
+    : null;
+  return spawnAnnotation || null;
+}
+
+function enforceUniqueSpawnAnnotation() {
+  const spawnAnnotations = world.annotations.filter(isSpawnAnnotation);
+  if (!spawnAnnotations.length) {
+    world.spawnPlatformReadingIndex = null;
+    return null;
+  }
+
+  const sortedSpawns = [...spawnAnnotations].sort(compareAnnotationsByStart);
+  const keptAnnotation = sortedSpawns.at(-1);
+  const removedAnnotations = new Set(sortedSpawns.slice(0, -1));
+
+  for (const annotation of removedAnnotations) {
+    markPdfAnnotationForRemoval(annotation);
+  }
+
+  if (removedAnnotations.size) {
+    world.annotations = world.annotations.filter((annotation) => !removedAnnotations.has(annotation));
+    clampSelectedAnnotationIndex();
+  }
+
+  const platform = annotationStartPlatform(keptAnnotation);
+  world.spawnPlatformReadingIndex = Number.isFinite(platform?.readingIndex)
+    ? platform.readingIndex
+    : null;
+  return keptAnnotation;
+}
+
+function setSpawnAnnotationPlatform(platform) {
+  if (!platform || !Number.isFinite(platform.readingIndex)) return null;
+
+  const range = readingIndexRange([platform]);
+  const rects = rectsForLineGroups(lineGroupsForPlatforms([platform]));
+  if (!range || !rects.length) return null;
+
+  let annotation = enforceUniqueSpawnAnnotation();
+  if (!annotation) {
+    annotation = {
+      id: createAnnotationId(),
+      type: "highlight",
+      source: "session",
+      sortOrder: nextAnnotationOrder,
+      createdAt: new Date().toISOString(),
+    };
+    nextAnnotationOrder += 1;
+    world.annotations.push(annotation);
+  } else {
+    markPdfAnnotationForRemoval(annotation);
+  }
+
+  annotation.type = "highlight";
+  annotation.text = platform.text || "";
+  annotation.comment = SPAWN_ANNOTATION_COMMENT;
+  annotation.rects = rects;
+  annotation.startReadingIndex = range.start;
+  annotation.endReadingIndex = range.end;
+  world.spawnPlatformReadingIndex = platform.readingIndex;
+  sortAnnotationsByStart(annotation.id);
+  return annotation;
+}
+
 function rectsForLineGroups(lineGroups) {
   return lineGroups.flatMap((group) => {
     if (!group.platforms.length) return [];
@@ -1212,7 +1329,7 @@ function addAnnotationFromSelection(comment = "") {
   if (!selectionPlatforms.length || !rects.length) return false;
   const range = readingIndexRange(selectionPlatforms);
 
-  world.annotations.push({
+  const annotation = {
     id: createAnnotationId(),
     type: "highlight",
     source: "session",
@@ -1223,8 +1340,10 @@ function addAnnotationFromSelection(comment = "") {
     endReadingIndex: range?.end,
     sortOrder: nextAnnotationOrder,
     createdAt: new Date().toISOString(),
-  });
+  };
+  world.annotations.push(annotation);
   nextAnnotationOrder += 1;
+  if (isSpawnAnnotation(annotation)) enforceUniqueSpawnAnnotation();
   renderAnnotationLayer();
   renderAnnotationSidebar();
   clearTextSelection();
@@ -1234,12 +1353,13 @@ function addAnnotationFromSelection(comment = "") {
 function renderAnnotationLayer() {
   pdfDocument.querySelector(".annotation-layer")?.remove();
   const hasVisibleMessages = messageAnnotationsVisible && world.messageAnnotations.length > 0;
-  if (!world.loaded || (!world.annotations.length && !hasVisibleMessages)) return;
+  const visibleAnnotations = world.annotations.filter(isVisibleAnnotation);
+  if (!world.loaded || (!visibleAnnotations.length && !hasVisibleMessages)) return;
 
   const layer = document.createElement("div");
   layer.className = "annotation-layer";
 
-  for (const annotation of world.annotations) {
+  for (const annotation of visibleAnnotations) {
     for (const rect of annotation.rects || []) {
       const highlight = document.createElement("div");
       highlight.className = "pdf-annotation-highlight";
@@ -1298,11 +1418,18 @@ function annotationPreviewText(annotation) {
 }
 
 function clampSelectedAnnotationIndex() {
-  if (!world.annotations.length) {
+  const entries = visibleAnnotationEntries();
+  if (!entries.length) {
     selectedAnnotationIndex = 0;
     return;
   }
-  selectedAnnotationIndex = Math.max(0, Math.min(selectedAnnotationIndex, world.annotations.length - 1));
+  if (!entries.some((entry) => entry.index === selectedAnnotationIndex)) {
+    selectedAnnotationIndex = entries[0].index;
+  }
+}
+
+function selectedVisibleAnnotationPosition() {
+  return visibleAnnotationEntries().findIndex((entry) => entry.index === selectedAnnotationIndex);
 }
 
 function scrollSelectedAnnotationIntoView() {
@@ -1325,8 +1452,9 @@ function renderAnnotationSidebar() {
   annotationSidebar.classList.toggle("is-menu-mode", annotationMenuMode);
   annotationModeLabel.textContent = t(annotationMenuMode ? "menuMode" : "gameMode");
   annotationList.replaceChildren();
+  const entries = visibleAnnotationEntries();
 
-  if (!world.annotations.length) {
+  if (!entries.length) {
     const empty = document.createElement("div");
     empty.className = "annotation-empty";
     empty.textContent = t("noAnnotations");
@@ -1334,7 +1462,7 @@ function renderAnnotationSidebar() {
     return;
   }
 
-  world.annotations.forEach((annotation, index) => {
+  entries.forEach(({ annotation, index }) => {
     const entry = document.createElement("button");
     entry.type = "button";
     entry.className = "annotation-entry";
@@ -1378,15 +1506,20 @@ function toggleAnnotationMenuMode() {
 }
 
 function selectAnnotationEntry(delta) {
-  if (!world.annotations.length) return;
-  selectedAnnotationIndex = (selectedAnnotationIndex + delta + world.annotations.length) % world.annotations.length;
+  const entries = visibleAnnotationEntries();
+  if (!entries.length) return;
+  const selectedPosition = entries.findIndex((entry) => entry.index === selectedAnnotationIndex);
+  const currentPosition = selectedPosition >= 0 ? selectedPosition : 0;
+  const nextPosition = (currentPosition + delta + entries.length) % entries.length;
+  selectedAnnotationIndex = entries[nextPosition].index;
   renderAnnotationSidebar();
   if (annotationMenuMode) focusSelectedAnnotation();
 }
 
 function selectedAnnotation() {
   clampSelectedAnnotationIndex();
-  return world.annotations[selectedAnnotationIndex] || null;
+  const annotation = world.annotations[selectedAnnotationIndex] || null;
+  return isVisibleAnnotation(annotation) ? annotation : null;
 }
 
 function focusSelectedAnnotation() {
@@ -1409,26 +1542,22 @@ function focusSelectedAnnotation() {
   restartAutoScroll();
   updateActivePage();
   renderPlayer();
+  const selectedPosition = selectedVisibleAnnotationPosition();
   setStatus("annotationFocused", {
-    index: selectedAnnotationIndex + 1,
-    total: world.annotations.length,
+    index: selectedPosition + 1,
+    total: visibleAnnotationEntries().length,
   });
 }
 
 function deleteSelectedAnnotation() {
   const annotation = selectedAnnotation();
   if (!annotation) return;
+  const wasSpawnAnnotation = isSpawnAnnotation(annotation);
 
-  if (annotation.source === "pdf") {
-    world.removedPdfAnnotations.push({
-      page: annotation.pdfPage || annotationFirstPage(annotation),
-      id: annotation.pdfId || annotation.id || "",
-      rect: annotation.pdfRect || [],
-      quadPoints: annotation.pdfQuadPoints || [],
-    });
-  }
+  markPdfAnnotationForRemoval(annotation);
 
   world.annotations.splice(selectedAnnotationIndex, 1);
+  if (wasSpawnAnnotation) syncSpawnPlatformFromAnnotations();
   clampSelectedAnnotationIndex();
   renderAnnotationLayer();
   renderAnnotationSidebar();
@@ -1785,6 +1914,7 @@ function importPdfAnnotations() {
       nextAnnotationOrder += 1;
     }
   }
+  enforceUniqueSpawnAnnotation();
   world.messageAnnotations.sort(compareAnnotationsByStart);
 }
 
@@ -1866,6 +1996,12 @@ function isPdfHighlightDict(annot) {
   return String(subtype).includes("Highlight");
 }
 
+function isPdfSpawnAnnotationDict(annot) {
+  if (!isPdfHighlightDict(annot)) return false;
+  const comment = pdfObjectText(annot.lookup?.(PDFName.of("Contents")));
+  return isSpawnAnnotationComment(comment);
+}
+
 function pdfAnnotationMatchesMetadata(annot, metadata) {
   const nm = pdfObjectText(annot.lookup?.(PDFName.of("NM")));
   if (metadata.id && nm && metadata.id === nm) return true;
@@ -1903,6 +2039,19 @@ function removePdfAnnotations(pdfDoc) {
       if (removals.some((removal) => pdfAnnotationMatchesRemoval(pdfDoc, annotRef, removal))) {
         annots.remove(index);
       }
+    }
+  });
+}
+
+function removePdfSpawnAnnotations(pdfDoc) {
+  pdfDoc.getPages().forEach((page) => {
+    const annots = page.node.lookupMaybe?.(PDFName.of("Annots"), PDFArray);
+    if (!annots) return;
+
+    for (let index = annots.size() - 1; index >= 0; index -= 1) {
+      const annotRef = annots.get(index);
+      const annot = lookupPdfAnnotation(pdfDoc, annotRef);
+      if (isPdfSpawnAnnotationDict(annot)) annots.remove(index);
     }
   });
 }
@@ -2007,6 +2156,39 @@ function addPdfHighlightAnnotation(pdfDoc, page, annotation) {
   pageAnnotationArray(pdfDoc, page).push(pdfDoc.context.register(dict));
 }
 
+function addPdfSpawnAnnotation(pdfDoc, pdfPages, platform) {
+  const rectsByPage = new Map();
+  for (const rect of rectsForLineGroups(lineGroupsForPlatforms([platform]))) {
+    if (!isWritableAnnotationRect(rect)) continue;
+    if (!rectsByPage.has(rect.page)) rectsByPage.set(rect.page, []);
+    rectsByPage.get(rect.page).push(rect);
+  }
+
+  for (const [pageNumber, rects] of rectsByPage) {
+    const pageInfo = world.pages[pageNumber - 1];
+    const pdfPage = pdfPages[pageNumber - 1];
+    if (!pageInfo || !pdfPage) continue;
+
+    const quads = rects
+      .map((rect) => worldRectToPdfQuad(pageInfo, rect))
+      .filter(isWritablePdfQuad);
+    if (!quads.length) continue;
+
+    const annotationRect = [
+      Math.min(...quads.map((quad) => quad.rect[0])),
+      Math.min(...quads.map((quad) => quad.rect[1])),
+      Math.max(...quads.map((quad) => quad.rect[2])),
+      Math.max(...quads.map((quad) => quad.rect[3])),
+    ];
+    addPdfHighlightAnnotation(pdfDoc, pdfPage, {
+      id: `BladeOfReaders-spawn-${pageNumber}`,
+      rect: annotationRect,
+      quadPoints: quads.flatMap((quad) => quad.quadPoints),
+      comment: SPAWN_ANNOTATION_COMMENT,
+    });
+  }
+}
+
 function annotationDownloadName() {
   const name = currentPdfName.trim() || "document.pdf";
   return /\.pdf$/iu.test(name) ? name : `${name}.pdf`;
@@ -2024,12 +2206,21 @@ function downloadBytes(bytes, name) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-async function annotatedPdfBytes() {
+async function annotatedPdfBytes(spawnPlatform = currentStandingPlatform()) {
   if (!currentPdfBytes) return null;
-  const sessionAnnotations = world.annotations.filter((annotation) => annotation.source === "session");
+  const hasSpawnAnnotationUpdate = Boolean(spawnPlatform);
+  const sessionAnnotations = world.annotations.filter((annotation) => (
+    annotation.source === "session"
+    && (!hasSpawnAnnotationUpdate || !isSpawnAnnotation(annotation))
+  ));
   const hasPdfAnnotationRemovals = world.removedPdfAnnotations.length > 0;
   const hasMessageAnnotationUpdates = world.messageAnnotations.some(messageVoteChanged);
-  if (!sessionAnnotations.length && !hasPdfAnnotationRemovals && !hasMessageAnnotationUpdates) {
+  if (
+    !sessionAnnotations.length
+    && !hasPdfAnnotationRemovals
+    && !hasMessageAnnotationUpdates
+    && !hasSpawnAnnotationUpdate
+  ) {
     return new Uint8Array(currentPdfBytes.slice(0));
   }
 
@@ -2040,6 +2231,7 @@ async function annotatedPdfBytes() {
   const pdfDoc = await PDFDocument.load(currentPdfBytes.slice(0));
   const pdfPages = pdfDoc.getPages();
   removePdfAnnotations(pdfDoc);
+  if (spawnPlatform) removePdfSpawnAnnotations(pdfDoc);
   updatePdfMessageAnnotations(pdfDoc);
 
   for (const annotation of sessionAnnotations) {
@@ -2074,6 +2266,8 @@ async function annotatedPdfBytes() {
       });
     }
   }
+
+  if (spawnPlatform) addPdfSpawnAnnotation(pdfDoc, pdfPages, spawnPlatform);
 
   return pdfDoc.save();
 }
@@ -2270,6 +2464,7 @@ async function loadPdf(file) {
   world.annotations = [];
   world.messageAnnotations = [];
   world.removedPdfAnnotations = [];
+  world.spawnPlatformReadingIndex = null;
   nextAnnotationOrder = 0;
   annotationMenuMode = false;
   selectedAnnotationIndex = 0;
@@ -2296,6 +2491,7 @@ async function loadPdf(file) {
   world.annotations = [];
   world.messageAnnotations = [];
   world.removedPdfAnnotations = [];
+  world.spawnPlatformReadingIndex = null;
   nextAnnotationOrder = 0;
   world.activePlatformLineId = null;
   world.minTextHeight = Infinity;
@@ -2569,6 +2765,30 @@ function supportedTextPlatforms() {
     ));
 }
 
+function currentStandingPlatform() {
+  const supportPoint = {
+    x: player.x + player.width / 2,
+    y: player.y + player.height,
+  };
+  return supportedTextPlatforms()
+    .sort((a, b) => (
+      distanceSquaredToRect(supportPoint, a) - distanceSquaredToRect(supportPoint, b)
+      || (a.readingIndex ?? Number.POSITIVE_INFINITY) - (b.readingIndex ?? Number.POSITIVE_INFINITY)
+      || a.page - b.page
+      || a.y - b.y
+      || a.x - b.x
+    ))[0] || null;
+}
+
+function updateSpawnAnnotationFromPlayer() {
+  const platform = currentStandingPlatform();
+  if (!platform) return null;
+  setSpawnAnnotationPlatform(platform);
+  renderAnnotationLayer();
+  renderAnnotationSidebar();
+  return platform;
+}
+
 function annotationIncludesPlatform(annotation, platform) {
   if (!platform) return false;
   const range = annotationReadingIndexRange(annotation);
@@ -2597,13 +2817,13 @@ function annotationDistanceToPlayerLocation(annotation, platforms) {
 }
 
 function syncSelectedAnnotationFromPlayer() {
-  if (annotationMenuMode || !world.annotations.length) return;
+  if (annotationMenuMode || !visibleAnnotationEntries().length) return;
   const platforms = supportedTextPlatforms();
   if (!platforms.length) return;
 
   sortAnnotationsByStart(world.annotations[selectedAnnotationIndex]?.id || null);
   let best = null;
-  world.annotations.forEach((annotation, index) => {
+  visibleAnnotationEntries().forEach(({ annotation, index }) => {
     const matchedPlatforms = platforms.filter((platform) => annotationIncludesPlatform(annotation, platform));
     if (!matchedPlatforms.length) return;
     const distance = annotationDistanceToPlayerLocation(annotation, matchedPlatforms);
@@ -2943,6 +3163,7 @@ async function handlePdfFile(file) {
     world.annotations = [];
     world.messageAnnotations = [];
     world.removedPdfAnnotations = [];
+    world.spawnPlatformReadingIndex = null;
     nextAnnotationOrder = 0;
     annotationMenuMode = false;
     selectedAnnotationIndex = 0;
@@ -2988,8 +3209,9 @@ async function downloadAnnotatedPdf() {
   if (!currentPdfBytes) return;
 
   try {
+    const spawnPlatform = updateSpawnAnnotationFromPlayer();
     setStatus("writingPdf");
-    const bytes = await annotatedPdfBytes();
+    const bytes = await annotatedPdfBytes(spawnPlatform);
     if (!bytes) return;
     downloadBytes(bytes, annotationDownloadName());
     setStatus("annotatedPdfReady");
