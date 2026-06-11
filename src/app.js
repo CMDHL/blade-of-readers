@@ -1109,41 +1109,6 @@ function rectsForLineGroups(lineGroups) {
   });
 }
 
-function firstSelectionPlatform(platforms) {
-  return platforms.reduce((first, platform) => {
-    if (!Number.isFinite(platform.readingIndex)) return first;
-    if (!first || platform.readingIndex < first.readingIndex) return platform;
-    return first;
-  }, null);
-}
-
-function annotationMarkerFromSelection(platforms, rects) {
-  const firstPlatform = firstSelectionPlatform(platforms);
-  if (firstPlatform) {
-    return {
-      page: firstPlatform.page,
-      x: firstPlatform.x,
-      y: firstPlatform.y,
-    };
-  }
-
-  const firstRect = rects.find((rect) => Number.isFinite(rect.x) && Number.isFinite(rect.y));
-  return firstRect ? { page: firstRect.page, x: firstRect.x, y: firstRect.y } : null;
-}
-
-function annotationMarkerPosition(annotation) {
-  if (
-    annotation?.marker
-    && Number.isFinite(annotation.marker.x)
-    && Number.isFinite(annotation.marker.y)
-  ) {
-    return annotation.marker;
-  }
-
-  const firstRect = (annotation?.rects || []).find((rect) => Number.isFinite(rect.x) && Number.isFinite(rect.y));
-  return firstRect ? { page: firstRect.page, x: firstRect.x, y: firstRect.y } : null;
-}
-
 function parseMessageAnnotationComment(comment) {
   const match = String(comment || "").match(/^\[msg\|(\d+)\|(\d+)(?:\|([+-]))?\]([\s\S]*)$/u);
   if (!match) return null;
@@ -1254,7 +1219,6 @@ function addAnnotationFromSelection(comment = "") {
     text: selectedText(),
     comment: comment.trim(),
     rects,
-    marker: annotationMarkerFromSelection(selectionPlatforms, rects),
     startReadingIndex: range?.start,
     endReadingIndex: range?.end,
     sortOrder: nextAnnotationOrder,
@@ -1279,24 +1243,12 @@ function renderAnnotationLayer() {
     for (const rect of annotation.rects || []) {
       const highlight = document.createElement("div");
       highlight.className = "pdf-annotation-highlight";
+      highlight.classList.toggle("has-comment", Boolean(annotation.comment));
       highlight.style.transform = `translate(${rect.x}px, ${rect.y}px)`;
       highlight.style.width = `${rect.width}px`;
       highlight.style.height = `${rect.height}px`;
       if (annotation.comment) highlight.title = annotation.comment;
       layer.append(highlight);
-    }
-
-    if (annotation.comment) {
-      const markerPosition = annotationMarkerPosition(annotation);
-      if (markerPosition) {
-        const marker = document.createElement("div");
-        const markerX = Math.max(0, markerPosition.x - 2);
-        const markerY = Math.max(0, markerPosition.y - 2);
-        marker.className = "pdf-annotation-comment-marker";
-        marker.style.transform = `translate(${markerX}px, ${markerY}px)`;
-        marker.title = annotation.comment;
-        layer.append(marker);
-      }
     }
   }
 
@@ -1807,7 +1759,6 @@ function importPdfAnnotations() {
         text: textFromPlatforms(matchedPlatforms),
         comment,
         rects,
-        marker: annotationMarkerFromSelection(matchedPlatforms, rects),
         startReadingIndex: range?.start,
         endReadingIndex: range?.end,
         sortOrder: nextAnnotationOrder,
