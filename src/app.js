@@ -3657,6 +3657,13 @@ function updateActivePage() {
   }
 }
 
+function wakeCameraFollowFromMovement({ movingLeft = false, movingRight = false, isDashing = false } = {}) {
+  if (!world.loaded || annotationMenuMode || activeMessageAnnotationId) return;
+  const hasMovementIntent = movingLeft || movingRight || isDashing;
+  const hasVelocity = Math.abs(player.vx) > 0.05 || Math.abs(player.vy) > 0.05;
+  if (hasMovementIntent || hasVelocity) autoScrollEnabled = true;
+}
+
 function updatePlayer() {
   const parryActive = isParrying();
   const movingLeft = !parryActive && actionPressed("left");
@@ -3711,6 +3718,7 @@ function updatePlayer() {
   player.coyote = player.grounded ? 8 : Math.max(0, player.coyote - 1);
   if (wasGrounded && !player.grounded) player.coyote = 8;
 
+  wakeCameraFollowFromMovement({ movingLeft, movingRight, isDashing });
   if (autoScrollEnabled && !usedPortal) keepPlayerInVisibleWindow();
   updateActivePage();
   syncSelectedAnnotationFromPlayer();
