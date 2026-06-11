@@ -57,6 +57,13 @@ const controllerMap = {
   menu: [8],
 };
 
+const controllerDpadButtons = {
+  up: 12,
+  down: 13,
+  left: 14,
+  right: 15,
+};
+
 const controllerButtonLabels = {
   0: "A",
   1: "B",
@@ -877,6 +884,34 @@ function lineGroupsForPlatforms(platforms) {
     }));
 }
 
+function textFromPlatformLineGroup(group) {
+  let lineText = "";
+  group.platforms.forEach((platform, index) => {
+    lineText += platform.text || "";
+    const nextPlatform = group.platforms[index + 1];
+    if (!nextPlatform) return;
+    if (
+      platform.textItemId
+      && platform.textItemId === nextPlatform.textItemId
+      && platform.sourceText === nextPlatform.sourceText
+      && Number.isFinite(platform.textEnd)
+      && Number.isFinite(nextPlatform.textStart)
+    ) {
+      lineText += platform.sourceText.slice(platform.textEnd, nextPlatform.textStart);
+    } else {
+      lineText += " ";
+    }
+  });
+  return lineText.trim();
+}
+
+function textFromPlatforms(platforms) {
+  return lineGroupsForPlatforms(platforms)
+    .map(textFromPlatformLineGroup)
+    .filter(Boolean)
+    .join("\n");
+}
+
 function rectsForLineGroups(lineGroups) {
   return lineGroups.flatMap((group) => {
     if (!group.platforms.length) return [];
@@ -936,30 +971,7 @@ function annotationMarkerPosition(annotation) {
 }
 
 function selectedText() {
-  const lineGroups = lineGroupsForPlatforms(selectedPlatforms());
-  return lineGroups
-    .map((group) => {
-      let lineText = "";
-      group.platforms.forEach((platform, index) => {
-        lineText += platform.text || "";
-        const nextPlatform = group.platforms[index + 1];
-        if (!nextPlatform) return;
-        if (
-          platform.textItemId
-          && platform.textItemId === nextPlatform.textItemId
-          && platform.sourceText === nextPlatform.sourceText
-          && Number.isFinite(platform.textEnd)
-          && Number.isFinite(nextPlatform.textStart)
-        ) {
-          lineText += platform.sourceText.slice(platform.textEnd, nextPlatform.textStart);
-        } else {
-          lineText += " ";
-        }
-      });
-      return lineText.trim();
-    })
-    .filter(Boolean)
-    .join("\n");
+  return textFromPlatforms(selectedPlatforms());
 }
 
 function updateAnnotationControls() {
@@ -1083,14 +1095,22 @@ function annotationFirstPage(annotation) {
   return annotation.rects?.[0]?.page || annotation.pdfPage || 1;
 }
 
-function annotationTitle(annotation) {
-  return annotation.comment ? t("commentEntry") : t("highlightEntry");
-}
-
 function compactText(text, maxLength = 96) {
   const normalized = (text || "").replace(/\s+/gu, " ").trim();
   if (normalized.length <= maxLength) return normalized;
   return `${normalized.slice(0, maxLength - 1).trim()}...`;
+}
+
+function firstContentLine(text) {
+  return String(text || "")
+    .split(/\r?\n/gu)
+    .map((line) => line.trim())
+    .find(Boolean) || "";
+}
+
+function annotationPreviewText(annotation) {
+  return compactText(firstContentLine(annotation.text))
+    || t(annotation.source === "pdf" ? "pdfAnnotationEntry" : "highlightEntry");
 }
 
 function clampSelectedAnnotationIndex() {
@@ -1125,17 +1145,16 @@ function renderAnnotationSidebar() {
 
     const meta = document.createElement("span");
     meta.className = "annotation-entry-meta";
-    meta.textContent = `${annotationTitle(annotation)} - ${t("pageEntry", { page: annotationFirstPage(annotation) })}`;
+    meta.textContent = annotationPreviewText(annotation);
 
-    const body = document.createElement("span");
-    body.className = "annotation-entry-body";
+    entry.append(meta);
     if (annotation.comment) {
+      const body = document.createElement("span");
+      body.className = "annotation-entry-body";
       body.textContent = annotation.comment;
-    } else {
-      body.textContent = compactText(annotation.text) || t(annotation.source === "pdf" ? "pdfAnnotationEntry" : "highlightEntry");
+      entry.append(body);
     }
 
-    entry.append(meta, body);
     annotationList.append(entry);
   });
 
@@ -1378,7 +1397,7 @@ function importPdfAnnotations() {
         pdfPage: page.number,
         pdfRect: Array.isArray(annotation.rect) ? [...annotation.rect] : [],
         pdfQuadPoints,
-        text: "",
+        text: textFromAnnotationRects(rects),
         comment: annotationText(annotation.contentsObj) || annotationText(annotation.contents),
         rects,
         createdAt: annotation.modificationDate || "",
@@ -1945,6 +1964,42 @@ function pointInRect(point, rect) {
     && point.y <= rect.y + rect.height;
 }
 
+function rectIntersectionSize(a, b) {
+  const width = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+  const height = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+  return {
+    width: Math.max(0, width),
+    height: Math.max(0, height),
+  };
+}
+
+function platformOverlapsAnnotationRect(platform, rect) {
+  if (platform.page !== rect.page || !rectsOverlap(platform, rect)) return false;
+
+  const center = {
+    x: platform.x + platform.width / 2,
+    y: platform.y + platform.height / 2,
+  };
+  if (pointInRect(center, rect)) return true;
+
+  const overlap = rectIntersectionSize(platform, rect);
+  if (!overlap.width || !overlap.height) return false;
+
+  const platformArea = Math.max(1, platform.width * platform.height);
+  const areaCoverage = (overlap.width * overlap.height) / platformArea;
+  const horizontalCoverage = overlap.width / Math.max(1, Math.min(platform.width, rect.width));
+  const verticalCoverage = overlap.height / Math.max(1, Math.min(platform.height, rect.height));
+  return areaCoverage >= 0.2 || (horizontalCoverage >= 0.45 && verticalCoverage >= 0.35);
+}
+
+function textFromAnnotationRects(rects) {
+  if (!rects?.length) return "";
+  const platforms = world.platforms.filter((platform) => (
+    rects.some((rect) => platformOverlapsAnnotationRect(platform, rect))
+  ));
+  return textFromPlatforms(platforms);
+}
+
 function eventPathIncludesElement(event, element) {
   if (event.composedPath?.().includes(element)) return true;
   return event.target instanceof Node && element.contains(event.target);
@@ -2255,10 +2310,10 @@ function updateControllerInput() {
   const rightStickY = gamepad?.axes?.[3] || 0;
   const deadzone = 0.35;
 
-  controllerDirections.left = axisX < -deadzone;
-  controllerDirections.right = axisX > deadzone;
-  controllerDirections.up = axisY < -deadzone;
-  controllerDirections.down = axisY > deadzone;
+  controllerDirections.left = axisX < -deadzone || pressedButtons.has(controllerDpadButtons.left);
+  controllerDirections.right = axisX > deadzone || pressedButtons.has(controllerDpadButtons.right);
+  controllerDirections.up = axisY < -deadzone || pressedButtons.has(controllerDpadButtons.up);
+  controllerDirections.down = axisY > deadzone || pressedButtons.has(controllerDpadButtons.down);
 
   controllerButtons.clear();
   pressedButtons.forEach((button) => controllerButtons.add(button));
