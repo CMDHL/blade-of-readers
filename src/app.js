@@ -5,6 +5,7 @@ const PDFJS_SRC = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.wor
 const pdfDocument = document.querySelector("#pdfDocument");
 const topbar = document.querySelector(".topbar");
 const topbarToggleButton = document.querySelector("#topbarToggleButton");
+const touchControllerToggleButton = document.querySelector("#touchControllerToggleButton");
 const readerStage = document.querySelector(".reader-stage");
 const playerSprite = document.querySelector("#playerSprite");
 const input = document.querySelector("#pdfInput");
@@ -212,6 +213,8 @@ let userPdfLoadVersion = 0;
 let userPdfLoadPending = false;
 let userPdfLoaded = false;
 let topbarHidden = false;
+let mobileTopbarDefaultApplied = false;
+let touchControllerEnabled = true;
 let annotationMenuMode = false;
 let selectedAnnotationIndex = 0;
 let nextAnnotationOrder = 0;
@@ -240,6 +243,8 @@ const translations = {
     downloadAnnotated: "Export PDF",
     hideTopbar: "Hide Top",
     showTopbar: "Show Top",
+    hideTouchControls: "Hide Ctrl",
+    showTouchControls: "Show Ctrl",
     hideCollisions: "Hide collider",
     showCollisions: "Show collider",
     hideMessages: "Hide msg",
@@ -326,6 +331,8 @@ const translations = {
     downloadAnnotated: "导出 PDF",
     hideTopbar: "隐藏顶部",
     showTopbar: "显示顶部",
+    hideTouchControls: "隐藏控制",
+    showTouchControls: "显示控制",
     hideCollisions: "隐藏碰撞",
     showCollisions: "显示碰撞",
     hideMessages: "隐藏谏言",
@@ -461,11 +468,26 @@ function updateTopbarToggleButton() {
   topbarToggleButton.setAttribute("aria-expanded", String(!topbarHidden));
 }
 
+function updateTouchControllerToggleButton() {
+  if (!touchControllerToggleButton) return;
+  const key = touchControllerEnabled ? "hideTouchControls" : "showTouchControls";
+  touchControllerToggleButton.dataset.i18n = key;
+  touchControllerToggleButton.textContent = t(key);
+  touchControllerToggleButton.setAttribute("aria-label", t(key));
+  touchControllerToggleButton.setAttribute("aria-pressed", String(touchControllerEnabled));
+}
+
 function setTopbarHidden(isHidden) {
   topbarHidden = isHidden;
   topbar.classList.toggle("is-hidden", topbarHidden);
   updateTopbarToggleButton();
   updateStickyTopbarHeight();
+}
+
+function setTouchControllerEnabled(isEnabled) {
+  touchControllerEnabled = isEnabled;
+  updateTouchControllerToggleButton();
+  updateResponsiveUiState();
 }
 
 function applyLanguage(language) {
@@ -493,6 +515,7 @@ function applyLanguage(language) {
   updateQuizToggleButtonLabel();
   updateTopbarToggleButton();
   updateControlLabels();
+  updateTouchControllerToggleButton();
   updateAnnotationControls();
   renderAnnotationSidebar();
   renderAnnotationRadial();
@@ -3762,11 +3785,19 @@ function clearVirtualControllerInput() {
 function updateResponsiveUiState(gamepad = activeGamepad()) {
   const mobile = isMobileDevice();
   const hasExternalController = Boolean(gamepad);
+  if (mobile && !mobileTopbarDefaultApplied) {
+    mobileTopbarDefaultApplied = true;
+    setTopbarHidden(true);
+  }
+  const touchControllerActiveNow = mobile && !hasExternalController && touchControllerEnabled;
   document.body.classList.toggle("is-mobile-device", mobile);
   document.body.classList.toggle("has-external-controller", hasExternalController);
   document.body.classList.toggle("is-annotation-menu-mode", annotationMenuMode);
-  touchControllerOverlay?.setAttribute("aria-hidden", String(!mobile || hasExternalController));
-  if (!mobile || hasExternalController) clearVirtualControllerInput();
+  document.body.classList.toggle("is-touch-controller-active", touchControllerActiveNow);
+  touchControllerOverlay?.setAttribute("aria-hidden", String(!touchControllerActiveNow));
+  touchControllerToggleButton?.setAttribute("aria-hidden", String(!mobile || hasExternalController));
+  updateTouchControllerToggleButton();
+  if (!touchControllerActiveNow) clearVirtualControllerInput();
 }
 
 function capturePointer(element, pointerId) {
@@ -3781,9 +3812,22 @@ function pointerTargetElement(event) {
   return event.target instanceof Element ? event.target : null;
 }
 
-function swallowDeadzoneEvent(event) {
+function touchControllerActive() {
+  return document.body.classList.contains("is-touch-controller-active");
+}
+
+function touchControllerControlTarget(target) {
+  return target?.closest([
+    ".touch-controller-toggle",
+    "[data-virtual-button]",
+    "[data-virtual-stick]",
+  ].join(","));
+}
+
+function swallowTouchControllerEvent(event) {
+  if (!touchControllerActive()) return false;
   const target = pointerTargetElement(event);
-  if (!target?.closest(".touch-deadzone")) return false;
+  if (touchControllerControlTarget(target)) return false;
   event.preventDefault();
   event.stopPropagation();
   window.getSelection?.()?.removeAllRanges();
@@ -3861,7 +3905,7 @@ function releaseVirtualStick(pointerId) {
 }
 
 function handleVirtualControllerPointerDown(event) {
-  if (swallowDeadzoneEvent(event)) return;
+  if (swallowTouchControllerEvent(event)) return;
   const target = pointerTargetElement(event);
   if (!target) return;
   const button = target.closest("[data-virtual-button]");
@@ -3881,7 +3925,7 @@ function handleVirtualControllerPointerDown(event) {
 }
 
 function handleVirtualControllerPointerMove(event) {
-  if (swallowDeadzoneEvent(event)) return;
+  if (swallowTouchControllerEvent(event)) return;
   if (!virtualStickPointers.has(event.pointerId)) return;
   event.preventDefault();
   event.stopPropagation();
@@ -3889,7 +3933,7 @@ function handleVirtualControllerPointerMove(event) {
 }
 
 function handleVirtualControllerPointerEnd(event) {
-  if (swallowDeadzoneEvent(event)) return;
+  if (swallowTouchControllerEvent(event)) return;
   if (!virtualButtonPointers.has(event.pointerId) && !virtualStickPointers.has(event.pointerId)) return;
   event.preventDefault();
   event.stopPropagation();
@@ -4151,6 +4195,12 @@ topbarToggleButton.addEventListener("click", () => {
   setTopbarHidden(!topbarHidden);
 });
 
+touchControllerToggleButton?.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  setTouchControllerEnabled(!touchControllerEnabled);
+});
+
 collisionButton.addEventListener("click", () => {
   collisionsVisible = !collisionsVisible;
   updateCollisionButtonLabel();
@@ -4210,18 +4260,27 @@ touchControllerOverlay?.addEventListener("pointerup", handleVirtualControllerPoi
 touchControllerOverlay?.addEventListener("pointercancel", handleVirtualControllerPointerEnd, { passive: false });
 touchControllerOverlay?.addEventListener("lostpointercapture", handleVirtualControllerPointerEnd, { passive: false });
 [
+  "pointerdown",
+  "pointermove",
+  "pointerup",
+  "pointercancel",
   "touchstart",
   "touchmove",
   "touchend",
   "touchcancel",
   "mousedown",
   "mouseup",
+  "click",
   "dblclick",
+  "wheel",
   "contextmenu",
   "selectstart",
   "dragstart",
+  "gesturestart",
+  "gesturechange",
+  "gestureend",
 ].forEach((eventName) => {
-  touchControllerOverlay?.addEventListener(eventName, swallowDeadzoneEvent, { passive: false });
+  document.addEventListener(eventName, swallowTouchControllerEvent, { passive: false, capture: true });
 });
 touchControllerOverlay?.addEventListener("click", (event) => {
   event.preventDefault();
