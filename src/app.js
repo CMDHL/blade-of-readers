@@ -396,12 +396,12 @@ const translations = {
     keysHelp: "攻击文字以选中，格挡攻击以答题。菜单模式下，攻击侧栏条目以删除批注。",
     messageDialogTitle: "谏言",
     closeMessage: "关闭",
-    goodMessage: "赞同",
-    badMessage: "反对",
+    goodMessage: "好评",
+    badMessage: "差评",
     messageOpened: "已打开谏言。",
     messageChoiceSaved: "已记录{choice}回应。",
-    messageChoiceGood: "赞同",
-    messageChoiceBad: "反对",
+    messageChoiceGood: "好评",
+    messageChoiceBad: "差评",
     loadingTitle: "正在加载 PDF...",
     loadingDescription: "正在准备关卡，完成后会切换显示。",
     waiting: "等待上传 PDF。",
@@ -444,6 +444,11 @@ function t(key, values = {}) {
 function setStatus(key, values = {}) {
   currentStatus = { key, values };
   statusText.textContent = t(key, values);
+}
+
+function updateHorizontalChromeOffset() {
+  const pageLeft = window.visualViewport?.pageLeft ?? window.scrollX;
+  document.documentElement.style.setProperty("--page-scroll-x", `${Math.max(0, pageLeft)}px`);
 }
 
 function updatePageText(page = currentPageText.page, total = currentPageText.total) {
@@ -521,6 +526,7 @@ function applyPdfViewScale({ centerPlayer = false } = {}) {
   pdfViewScale = clampPdfViewScale(pdfViewScale);
   pdfDocument.style.transform = `scale(${pdfViewScale})`;
   document.body.classList.toggle("is-pdf-zoomed", pdfViewScale > 1);
+  updateHorizontalChromeOffset();
   setPdfViewportSize();
   updatePdfZoomControls();
   if (centerPlayer) restartAutoScroll();
@@ -4425,11 +4431,13 @@ window.addEventListener("keyup", (event) => {
 });
 
 window.addEventListener("scroll", () => {
+  updateHorizontalChromeOffset();
   if (performance.now() < programmaticScrollUntil) return;
   markManualScrollIntent();
 }, { passive: true });
 
 window.addEventListener("resize", () => {
+  updateHorizontalChromeOffset();
   updateStickyTopbarHeight();
   updateResponsiveUiState();
   if (!world.loaded) return;
@@ -4454,11 +4462,13 @@ readerStage.addEventListener("pointerdown", teleportPlayerToClick);
 
 if (window.visualViewport) {
   window.visualViewport.addEventListener("resize", () => {
+    updateHorizontalChromeOffset();
     updateResponsiveUiState();
     if (!world.loaded) return;
     keepPlayerInVisibleWindow();
   });
   window.visualViewport.addEventListener("scroll", () => {
+    updateHorizontalChromeOffset();
     if (performance.now() < programmaticScrollUntil) return;
     markManualScrollIntent();
   });
@@ -4466,6 +4476,7 @@ if (window.visualViewport) {
 
 applyLanguage(detectLanguage());
 applyPdfViewScale();
+updateHorizontalChromeOffset();
 updateResponsiveUiState();
 loadTutorialPdfForLanguage(currentLanguage);
 if (window.ResizeObserver && topbar) {

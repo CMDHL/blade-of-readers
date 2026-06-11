@@ -13,6 +13,7 @@
   --statusbar-offset: 52px;
   --sticky-topbar-height: 156px;
   --sticky-sidebar-gap: 14px;
+  --page-scroll-x: 0px;
 }
 
 * {
@@ -36,6 +37,11 @@ body {
 
 body.is-pdf-zoomed {
   overflow-x: auto;
+}
+
+body.is-pdf-zoomed .topbar,
+body.is-pdf-zoomed .annotation-sidebar {
+  transform: translateX(var(--page-scroll-x));
 }
 
 button,
@@ -359,6 +365,7 @@ button:disabled {
 .annotation-sidebar {
   position: sticky;
   top: calc(var(--sticky-topbar-height) + var(--sticky-sidebar-gap));
+  z-index: 8;
   max-height: calc(100vh - var(--sticky-topbar-height) - var(--sticky-sidebar-gap) - var(--statusbar-offset));
   min-height: 220px;
   display: flex;
@@ -497,6 +504,7 @@ button:disabled {
   line-height: 1.38;
   text-align: center;
   overflow-wrap: anywhere;
+  transform: translateX(var(--page-scroll-x));
   transform-origin: center;
   animation: quiz-prompt-breathe 2400ms ease-in-out infinite;
   box-shadow:
@@ -511,11 +519,11 @@ button:disabled {
 @keyframes quiz-prompt-breathe {
   0%,
   100% {
-    transform: scale(1);
+    transform: translateX(var(--page-scroll-x)) scale(1);
   }
 
   50% {
-    transform: scale(1.035);
+    transform: translateX(var(--page-scroll-x)) scale(1.035);
   }
 }
 
