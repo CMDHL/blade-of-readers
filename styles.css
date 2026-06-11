@@ -814,13 +814,13 @@ body.is-mobile-device:not(.has-external-controller) .touch-controller-overlay {
 }
 
 .touch-stick-left {
-  left: calc(env(safe-area-inset-left) + 16px);
-  bottom: calc(env(safe-area-inset-bottom) + 68px);
+  left: calc(env(safe-area-inset-left) + clamp(16px, 13vw, 92px));
+  bottom: calc(env(safe-area-inset-bottom) + 62px);
 }
 
 .touch-stick-right {
-  right: calc(env(safe-area-inset-right) + 18px);
-  bottom: calc(env(safe-area-inset-bottom) + 178px);
+  right: calc(env(safe-area-inset-right) + clamp(116px, 25vw, 184px));
+  bottom: calc(env(safe-area-inset-bottom) + clamp(168px, 34vh, 242px));
 }
 
 .touch-stick::before {
