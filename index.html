@@ -166,6 +166,36 @@
         <div class="annotation-radial-option option-comment" data-radial-choice="commentSelection" data-i18n="commentSelection">Comment</div>
       </div>
 
+      <div id="touchControllerOverlay" class="touch-controller-overlay" aria-hidden="true">
+        <div class="touch-shoulder-group touch-shoulder-group-left">
+          <button type="button" class="touch-control touch-shoulder" data-virtual-button="6" aria-label="LT">LT</button>
+          <button type="button" class="touch-control touch-shoulder" data-virtual-button="4" aria-label="LB">LB</button>
+          <button type="button" class="touch-control touch-view" data-virtual-button="8" aria-label="View" data-i18n="view">View</button>
+        </div>
+
+        <div class="touch-shoulder-group touch-shoulder-group-right">
+          <button type="button" class="touch-control touch-shoulder" data-virtual-button="5" aria-label="RB">RB</button>
+          <button type="button" class="touch-control touch-shoulder" data-virtual-button="7" aria-label="RT">RT</button>
+        </div>
+
+        <div class="touch-stick touch-stick-left" data-virtual-stick="left" role="button" aria-label="Left stick" data-i18n-attr="aria-label:leftStick">
+          <span class="touch-stick-label">L</span>
+          <span class="touch-stick-knob"></span>
+        </div>
+
+        <div class="touch-stick touch-stick-right" data-virtual-stick="right" role="button" aria-label="Right stick" data-i18n-attr="aria-label:rightStick">
+          <span class="touch-stick-label">R</span>
+          <span class="touch-stick-knob"></span>
+        </div>
+
+        <div class="touch-face-buttons" aria-label="Face buttons">
+          <button type="button" class="touch-control touch-face touch-face-y" data-virtual-button="3" aria-label="Y">Y</button>
+          <button type="button" class="touch-control touch-face touch-face-x" data-virtual-button="2" aria-label="X">X</button>
+          <button type="button" class="touch-control touch-face touch-face-b" data-virtual-button="1" aria-label="B">B</button>
+          <button type="button" class="touch-control touch-face touch-face-a" data-virtual-button="0" aria-label="A">A</button>
+        </div>
+      </div>
+
       <div id="messageDialog" class="message-dialog-backdrop" role="dialog" aria-modal="true" aria-labelledby="messageDialogTitle" hidden>
         <div class="message-dialog-panel">
           <h2 id="messageDialogTitle" data-i18n="messageDialogTitle">Message</h2>

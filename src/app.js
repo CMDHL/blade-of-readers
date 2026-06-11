@@ -27,6 +27,7 @@ const pageText = document.querySelector("#pageText");
 const messageDialog = document.querySelector("#messageDialog");
 const messageDialogText = document.querySelector("#messageDialogText");
 const quizPrompt = document.querySelector("#quizPrompt");
+const touchControllerOverlay = document.querySelector("#touchControllerOverlay");
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_SRC;
 
@@ -184,6 +185,14 @@ const previousControllerDirections = {
   up: false,
   down: false,
 };
+const virtualControllerButtons = new Set();
+const virtualButtonPointers = new Map();
+const virtualStickPointers = new Map();
+const virtualControllerSticks = {
+  left: { x: 0, y: 0 },
+  right: { x: 0, y: 0 },
+};
+const mobilePointerQuery = window.matchMedia?.("(any-pointer: coarse)");
 let remappingAction = null;
 let remappingDevice = null;
 let controllerRemapBaseline = new Set();
@@ -255,8 +264,10 @@ const translations = {
     attack: "Attack",
     parry: "Parry",
     menu: "Menu",
+    view: "View",
     annotationActions: "Actions",
     radialControl: "LB + right stick",
+    rightStick: "Right stick",
     annotationsLabel: "Annotations",
     gameMode: "Game",
     menuMode: "Menu",
@@ -339,8 +350,10 @@ const translations = {
     attack: "攻击",
     parry: "格挡",
     menu: "菜单",
+    view: "视图",
     annotationActions: "操作",
     radialControl: "LB + 右摇杆",
+    rightStick: "右摇杆",
     annotationsLabel: "批注",
     gameMode: "游戏",
     menuMode: "菜单",
@@ -539,10 +552,44 @@ function updateStickyTopbarHeight() {
   document.documentElement.style.setProperty("--sticky-topbar-height", `${height}px`);
 }
 
+function viewportSize() {
+  const viewport = window.visualViewport;
+  return {
+    width: viewport?.width ?? window.innerWidth,
+    height: viewport?.height ?? window.innerHeight,
+  };
+}
+
+function shellInlinePadding() {
+  const bodyStyles = getComputedStyle(document.body);
+  const rootStyles = getComputedStyle(document.documentElement);
+  return Number.parseFloat(bodyStyles.getPropertyValue("--shell-inline-padding"))
+    || Number.parseFloat(rootStyles.getPropertyValue("--shell-inline-padding"))
+    || 0;
+}
+
+function isMobileDevice() {
+  const { width, height } = viewportSize();
+  const compactSide = Math.min(width, height) <= 820;
+  const touchCapable = Boolean(navigator.userAgentData?.mobile)
+    || mobilePointerQuery?.matches
+    || navigator.maxTouchPoints > 0
+    || /Android|iPhone|iPad|iPod|Mobile/iu.test(navigator.userAgent || "");
+  return Boolean(touchCapable && compactSide);
+}
+
+function mobileLandscapeAvailableWidth() {
+  const { width, height } = viewportSize();
+  return Math.max(1, Math.max(width, height) - shellInlinePadding() * 2);
+}
+
 function readerStageAvailableWidth() {
+  if (isMobileDevice()) {
+    return Math.max(1, Math.floor(Math.min(1100, mobileLandscapeAvailableWidth())));
+  }
   const stageWidth = readerStage.getBoundingClientRect().width;
-  const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
-  const shellPadding = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--shell-inline-padding")) || 0;
+  const viewportWidth = viewportSize().width;
+  const shellPadding = shellInlinePadding();
   const fallbackWidth = Math.max(1, viewportWidth - shellPadding * 2);
   return Math.max(1, Math.floor(Math.min(1100, stageWidth || fallbackWidth)));
 }
@@ -1618,6 +1665,7 @@ function setAnnotationMenuMode(isActive) {
   updateAnnotationControls();
   renderAnnotationSidebar();
   if (annotationMenuMode) focusSelectedAnnotation();
+  updateResponsiveUiState();
   setStatus(annotationMenuMode ? "menuModeOn" : "menuModeOff");
 }
 
@@ -2693,6 +2741,7 @@ function resetAfterPdfLoadError() {
   annotationRadialActive = false;
   annotationRadialChoice = null;
   activeMessageAnnotationId = null;
+  updateResponsiveUiState();
   removeActiveQuizEnemy();
   renderQuizPrompt(null);
   renderQuizAnswerLayer();
@@ -2726,6 +2775,7 @@ async function loadPdf(source, loadVersion = nextPdfLoadVersion()) {
   annotationRadialActive = false;
   annotationRadialChoice = null;
   activeMessageAnnotationId = null;
+  updateResponsiveUiState();
   removeActiveQuizEnemy();
   renderQuizPrompt(null);
   renderQuizAnswerLayer();
@@ -3656,7 +3706,7 @@ function teleportPlayerToClick(event) {
 
 function activeGamepad() {
   const gamepads = navigator.getGamepads?.() || [];
-  return Array.from(gamepads).find(Boolean) || null;
+  return Array.from(gamepads).find((gamepad) => gamepad && gamepad.connected !== false) || null;
 }
 
 function pressedGamepadButtons(gamepad) {
@@ -3666,6 +3716,173 @@ function pressedGamepadButtons(gamepad) {
     if (button.pressed || button.value > 0.5) pressed.add(index);
   });
   return pressed;
+}
+
+function controllerPressedButtons(gamepad) {
+  const pressed = pressedGamepadButtons(gamepad);
+  virtualControllerButtons.forEach((button) => pressed.add(button));
+  return pressed;
+}
+
+function dominantControllerAxis(gamepadAxis = 0, virtualAxis = 0) {
+  return Math.abs(virtualAxis) > Math.abs(gamepadAxis) ? virtualAxis : gamepadAxis;
+}
+
+function hasVirtualControllerInput() {
+  return virtualControllerButtons.size > 0
+    || virtualControllerSticks.left.x !== 0
+    || virtualControllerSticks.left.y !== 0
+    || virtualControllerSticks.right.x !== 0
+    || virtualControllerSticks.right.y !== 0;
+}
+
+function resetVirtualStickElement(element) {
+  if (!element) return;
+  const stickName = element.dataset.virtualStick;
+  if (virtualControllerSticks[stickName]) {
+    virtualControllerSticks[stickName].x = 0;
+    virtualControllerSticks[stickName].y = 0;
+  }
+  element.style.setProperty("--stick-x", "0px");
+  element.style.setProperty("--stick-y", "0px");
+  element.classList.remove("is-active");
+}
+
+function clearVirtualControllerInput() {
+  if (!hasVirtualControllerInput() && !virtualButtonPointers.size && !virtualStickPointers.size) return;
+  virtualControllerButtons.clear();
+  virtualButtonPointers.clear();
+  virtualStickPointers.clear();
+  touchControllerOverlay?.querySelectorAll("[data-virtual-button]").forEach((button) => {
+    button.classList.remove("is-active");
+  });
+  touchControllerOverlay?.querySelectorAll("[data-virtual-stick]").forEach(resetVirtualStickElement);
+}
+
+function updateResponsiveUiState(gamepad = activeGamepad()) {
+  const mobile = isMobileDevice();
+  const hasExternalController = Boolean(gamepad);
+  document.body.classList.toggle("is-mobile-device", mobile);
+  document.body.classList.toggle("has-external-controller", hasExternalController);
+  document.body.classList.toggle("is-annotation-menu-mode", annotationMenuMode);
+  touchControllerOverlay?.setAttribute("aria-hidden", String(!mobile || hasExternalController));
+  if (!mobile || hasExternalController) clearVirtualControllerInput();
+}
+
+function capturePointer(element, pointerId) {
+  try {
+    element.setPointerCapture?.(pointerId);
+  } catch {
+    // Some browsers reject capture after synthetic pointer transitions.
+  }
+}
+
+function pointerTargetElement(event) {
+  return event.target instanceof Element ? event.target : null;
+}
+
+function virtualButtonValue(element) {
+  const value = Number.parseInt(element?.dataset.virtualButton || "", 10);
+  return Number.isInteger(value) ? value : null;
+}
+
+function pressVirtualButton(element, pointerId) {
+  const button = virtualButtonValue(element);
+  if (button === null) return;
+  virtualButtonPointers.set(pointerId, { button, element });
+  virtualControllerButtons.add(button);
+  element.classList.add("is-active");
+}
+
+function releaseVirtualButton(pointerId) {
+  const pointer = virtualButtonPointers.get(pointerId);
+  if (!pointer) return;
+  virtualButtonPointers.delete(pointerId);
+  if (![...virtualButtonPointers.values()].some((item) => item.button === pointer.button)) {
+    virtualControllerButtons.delete(pointer.button);
+  }
+  if (![...virtualButtonPointers.values()].some((item) => item.element === pointer.element)) {
+    pointer.element.classList.remove("is-active");
+  }
+}
+
+function setVirtualStickFromPointer(element, event) {
+  const stickName = element.dataset.virtualStick;
+  const stick = virtualControllerSticks[stickName];
+  if (!stick) return;
+
+  const rect = element.getBoundingClientRect();
+  const radius = Math.max(1, rect.width * 0.35);
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
+  let deltaX = event.clientX - centerX;
+  let deltaY = event.clientY - centerY;
+  const distance = Math.hypot(deltaX, deltaY);
+  if (distance > radius) {
+    const clamp = radius / distance;
+    deltaX *= clamp;
+    deltaY *= clamp;
+  }
+
+  stick.x = deltaX / radius;
+  stick.y = deltaY / radius;
+  element.style.setProperty("--stick-x", `${deltaX}px`);
+  element.style.setProperty("--stick-y", `${deltaY}px`);
+  element.classList.add("is-active");
+}
+
+function pressVirtualStick(element, pointerId, event) {
+  virtualStickPointers.set(pointerId, { name: element.dataset.virtualStick, element });
+  element.classList.add("is-active");
+  setVirtualStickFromPointer(element, event);
+}
+
+function updateVirtualStick(pointerId, event) {
+  const pointer = virtualStickPointers.get(pointerId);
+  if (!pointer) return;
+  setVirtualStickFromPointer(pointer.element, event);
+}
+
+function releaseVirtualStick(pointerId) {
+  const pointer = virtualStickPointers.get(pointerId);
+  if (!pointer) return;
+  virtualStickPointers.delete(pointerId);
+  if ([...virtualStickPointers.values()].some((item) => item.element === pointer.element)) return;
+  resetVirtualStickElement(pointer.element);
+}
+
+function handleVirtualControllerPointerDown(event) {
+  const target = pointerTargetElement(event);
+  if (!target) return;
+  const button = target.closest("[data-virtual-button]");
+  const stick = target.closest("[data-virtual-stick]");
+  if (!button && !stick) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  if (button) {
+    capturePointer(button, event.pointerId);
+    pressVirtualButton(button, event.pointerId);
+    return;
+  }
+
+  capturePointer(stick, event.pointerId);
+  pressVirtualStick(stick, event.pointerId, event);
+}
+
+function handleVirtualControllerPointerMove(event) {
+  if (!virtualStickPointers.has(event.pointerId)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  updateVirtualStick(event.pointerId, event);
+}
+
+function handleVirtualControllerPointerEnd(event) {
+  if (!virtualButtonPointers.has(event.pointerId) && !virtualStickPointers.has(event.pointerId)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  releaseVirtualButton(event.pointerId);
+  releaseVirtualStick(event.pointerId);
 }
 
 function storePreviousControllerState(pressedButtons) {
@@ -3679,11 +3896,12 @@ function storePreviousControllerState(pressedButtons) {
 
 function updateControllerInput() {
   const gamepad = activeGamepad();
-  const pressedButtons = pressedGamepadButtons(gamepad);
-  const axisX = gamepad?.axes?.[0] || 0;
-  const axisY = gamepad?.axes?.[1] || 0;
-  const rightStickX = gamepad?.axes?.[2] || 0;
-  const rightStickY = gamepad?.axes?.[3] || 0;
+  updateResponsiveUiState(gamepad);
+  const pressedButtons = controllerPressedButtons(gamepad);
+  const axisX = dominantControllerAxis(gamepad?.axes?.[0] || 0, virtualControllerSticks.left.x);
+  const axisY = dominantControllerAxis(gamepad?.axes?.[1] || 0, virtualControllerSticks.left.y);
+  const rightStickX = dominantControllerAxis(gamepad?.axes?.[2] || 0, virtualControllerSticks.right.x);
+  const rightStickY = dominantControllerAxis(gamepad?.axes?.[3] || 0, virtualControllerSticks.right.y);
   const deadzone = 0.35;
 
   controllerDirections.left = axisX < -deadzone || pressedButtons.has(controllerDpadButtons.left);
@@ -3969,9 +4187,19 @@ controlsPanel.addEventListener("click", (event) => {
   remappingAction = button.dataset.mapAction;
   remappingDevice = button.dataset.mapDevice;
   controllerRemapBaseline = remappingDevice === "controller"
-    ? pressedGamepadButtons(activeGamepad())
+    ? controllerPressedButtons(activeGamepad())
     : new Set();
   updateControlLabels();
+});
+
+touchControllerOverlay?.addEventListener("pointerdown", handleVirtualControllerPointerDown, { passive: false });
+touchControllerOverlay?.addEventListener("pointermove", handleVirtualControllerPointerMove, { passive: false });
+touchControllerOverlay?.addEventListener("pointerup", handleVirtualControllerPointerEnd, { passive: false });
+touchControllerOverlay?.addEventListener("pointercancel", handleVirtualControllerPointerEnd, { passive: false });
+touchControllerOverlay?.addEventListener("lostpointercapture", handleVirtualControllerPointerEnd, { passive: false });
+touchControllerOverlay?.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
 });
 
 window.addEventListener("keydown", (event) => {
@@ -4041,6 +4269,7 @@ window.addEventListener("scroll", () => {
 
 window.addEventListener("resize", () => {
   updateStickyTopbarHeight();
+  updateResponsiveUiState();
   if (!world.loaded) return;
   keepPlayerInVisibleWindow();
 });
@@ -4048,7 +4277,14 @@ window.addEventListener("resize", () => {
 window.addEventListener("wheel", markManualScrollIntent, { passive: true });
 window.addEventListener("touchmove", markManualScrollIntent, { passive: true });
 document.addEventListener("pointerdown", (event) => {
-  if (!annotationMenuMode || event.target.closest("[data-annotation-index]")) return;
+  const target = pointerTargetElement(event);
+  if (
+    !annotationMenuMode
+    || target?.closest("[data-annotation-index]")
+    || target?.closest(".touch-controller-overlay")
+  ) {
+    return;
+  }
   teleportSuppressedPointerEvents.add(event);
   setAnnotationMenuMode(false);
 }, { capture: true });
@@ -4056,6 +4292,7 @@ readerStage.addEventListener("pointerdown", teleportPlayerToClick);
 
 if (window.visualViewport) {
   window.visualViewport.addEventListener("resize", () => {
+    updateResponsiveUiState();
     if (!world.loaded) return;
     keepPlayerInVisibleWindow();
   });
@@ -4066,10 +4303,14 @@ if (window.visualViewport) {
 }
 
 applyLanguage(detectLanguage());
+updateResponsiveUiState();
 loadTutorialPdfForLanguage(currentLanguage);
 if (window.ResizeObserver && topbar) {
   new ResizeObserver(updateStickyTopbarHeight).observe(topbar);
 }
+mobilePointerQuery?.addEventListener?.("change", () => updateResponsiveUiState());
+window.addEventListener("gamepadconnected", (event) => updateResponsiveUiState(event.gamepad));
+window.addEventListener("gamepaddisconnected", () => updateResponsiveUiState());
 updateStickyTopbarHeight();
 setDocumentSize();
 resetPlayer();
