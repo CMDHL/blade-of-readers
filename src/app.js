@@ -3781,6 +3781,15 @@ function pointerTargetElement(event) {
   return event.target instanceof Element ? event.target : null;
 }
 
+function swallowDeadzoneEvent(event) {
+  const target = pointerTargetElement(event);
+  if (!target?.closest(".touch-deadzone")) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  window.getSelection?.()?.removeAllRanges();
+  return true;
+}
+
 function virtualButtonValue(element) {
   const value = Number.parseInt(element?.dataset.virtualButton || "", 10);
   return Number.isInteger(value) ? value : null;
@@ -3852,13 +3861,9 @@ function releaseVirtualStick(pointerId) {
 }
 
 function handleVirtualControllerPointerDown(event) {
+  if (swallowDeadzoneEvent(event)) return;
   const target = pointerTargetElement(event);
   if (!target) return;
-  if (target.closest(".touch-deadzone")) {
-    event.preventDefault();
-    event.stopPropagation();
-    return;
-  }
   const button = target.closest("[data-virtual-button]");
   const stick = target.closest("[data-virtual-stick]");
   if (!button && !stick) return;
@@ -3876,6 +3881,7 @@ function handleVirtualControllerPointerDown(event) {
 }
 
 function handleVirtualControllerPointerMove(event) {
+  if (swallowDeadzoneEvent(event)) return;
   if (!virtualStickPointers.has(event.pointerId)) return;
   event.preventDefault();
   event.stopPropagation();
@@ -3883,6 +3889,7 @@ function handleVirtualControllerPointerMove(event) {
 }
 
 function handleVirtualControllerPointerEnd(event) {
+  if (swallowDeadzoneEvent(event)) return;
   if (!virtualButtonPointers.has(event.pointerId) && !virtualStickPointers.has(event.pointerId)) return;
   event.preventDefault();
   event.stopPropagation();
@@ -4202,6 +4209,20 @@ touchControllerOverlay?.addEventListener("pointermove", handleVirtualControllerP
 touchControllerOverlay?.addEventListener("pointerup", handleVirtualControllerPointerEnd, { passive: false });
 touchControllerOverlay?.addEventListener("pointercancel", handleVirtualControllerPointerEnd, { passive: false });
 touchControllerOverlay?.addEventListener("lostpointercapture", handleVirtualControllerPointerEnd, { passive: false });
+[
+  "touchstart",
+  "touchmove",
+  "touchend",
+  "touchcancel",
+  "mousedown",
+  "mouseup",
+  "dblclick",
+  "contextmenu",
+  "selectstart",
+  "dragstart",
+].forEach((eventName) => {
+  touchControllerOverlay?.addEventListener(eventName, swallowDeadzoneEvent, { passive: false });
+});
 touchControllerOverlay?.addEventListener("click", (event) => {
   event.preventDefault();
   event.stopPropagation();
