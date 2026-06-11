@@ -46,6 +46,16 @@ const SPAWN_ANNOTATION_COMMENT = "[spawn]";
 const QUIZ_ANNOTATION_PREFIX = "[quiz]";
 const QUIZ_DEFEAT_FADE_MS = 1400;
 const QUIZ_SPAWN_FADE_MS = 2000;
+const TUTORIAL_PDFS = {
+  en: {
+    name: "Tutorial_en.pdf",
+    url: new URL("../Tutorial_en.pdf", import.meta.url).href,
+  },
+  zh: {
+    name: "Tutorial_zh.pdf",
+    url: new URL("../Tutorial_zh.pdf", import.meta.url).href,
+  },
+};
 
 const keyMap = {
   left: ["ArrowLeft"],
@@ -188,6 +198,10 @@ let currentStatus = { key: "waiting", values: {} };
 let currentPageText = { page: 1, total: null };
 let currentPdfBytes = null;
 let currentPdfName = "document.pdf";
+let pdfLoadVersion = 0;
+let userPdfLoadVersion = 0;
+let userPdfLoadPending = false;
+let userPdfLoaded = false;
 let topbarHidden = false;
 let annotationMenuMode = false;
 let selectedAnnotationIndex = 0;
@@ -2632,12 +2646,73 @@ function setLoadingPdf(isLoading) {
   loadingOverlay.setAttribute("aria-busy", String(isLoading));
 }
 
-async function loadPdf(file) {
+function nextPdfLoadVersion() {
+  pdfLoadVersion += 1;
+  return pdfLoadVersion;
+}
+
+function assertCurrentPdfLoad(loadVersion) {
+  if (loadVersion !== pdfLoadVersion) {
+    throw new Error("stale-pdf-load");
+  }
+}
+
+function isStalePdfLoad(error) {
+  return error?.message === "stale-pdf-load";
+}
+
+function tutorialPdfSource(language = currentLanguage) {
+  const tutorial = TUTORIAL_PDFS[translations[language] ? language : "en"] || TUTORIAL_PDFS.en;
+  return {
+    name: tutorial.name,
+    arrayBuffer: async () => {
+      const response = await fetch(tutorial.url);
+      if (!response.ok) throw new Error("tutorial-pdf-read-error");
+      return response.arrayBuffer();
+    },
+  };
+}
+
+function resetAfterPdfLoadError() {
+  setLoadingPdf(false);
+  world.loaded = false;
+  world.pages = [];
+  world.platforms = [];
+  world.portals = [];
+  currentPdfBytes = null;
+  world.annotations = [];
+  world.messageAnnotations = [];
+  world.quizAnnotations = [];
+  world.removedPdfAnnotations = [];
+  world.spawnPlatformReadingIndex = null;
+  nextAnnotationOrder = 0;
+  annotationMenuMode = false;
+  selectedAnnotationIndex = 0;
+  annotationRadialActive = false;
+  annotationRadialChoice = null;
+  activeMessageAnnotationId = null;
+  removeActiveQuizEnemy();
+  renderQuizPrompt(null);
+  renderQuizAnswerLayer();
+  updateQuizPauseButtonLabel();
+  updateQuizToggleButtonLabel();
+  renderMessageDialog();
+  renderAnnotationRadial();
+  updateAnnotationControls();
+  renderAnnotationSidebar();
+  clearTextSelection({ render: false });
+  clearPdfDocument();
+  playerSprite.hidden = true;
+  setStatus("pdfReadError");
+  dropZone.classList.remove("is-hidden");
+}
+
+async function loadPdf(source, loadVersion = nextPdfLoadVersion()) {
   world.loaded = false;
   playerSprite.hidden = true;
   dropZone.classList.add("is-hidden");
   currentPdfBytes = null;
-  currentPdfName = file?.name || "document.pdf";
+  currentPdfName = source?.name || "document.pdf";
   world.annotations = [];
   world.messageAnnotations = [];
   world.quizAnnotations = [];
@@ -2661,10 +2736,13 @@ async function loadPdf(file) {
   clearPdfDocument();
   setLoadingPdf(true);
   setStatus("readingPdf");
-  const bytes = await file.arrayBuffer();
+  const bytes = await source.arrayBuffer();
+  assertCurrentPdfLoad(loadVersion);
   currentPdfBytes = bytes.slice(0);
   const pdf = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
+  assertCurrentPdfLoad(loadVersion);
   const firstPage = await pdf.getPage(1);
+  assertCurrentPdfLoad(loadVersion);
   const availableWidth = readerStageAvailableWidth();
 
   world.renderWidth = availableWidth;
@@ -2683,6 +2761,7 @@ async function loadPdf(file) {
   let offsetY = 0;
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
     const page = pageNumber === 1 ? firstPage : await pdf.getPage(pageNumber);
+    assertCurrentPdfLoad(loadVersion);
     const baseViewport = page.getViewport({ scale: 1 });
     const viewport = page.getViewport({ scale: availableWidth / baseViewport.width });
     const pageCanvas = document.createElement("canvas");
@@ -2700,10 +2779,13 @@ async function loadPdf(file) {
       renderOptions.annotationMode = pdfjsLib.AnnotationMode.DISABLE;
     }
     await page.render(renderOptions).promise;
-    pdfDocument.insertBefore(pageCanvas, playerSprite);
+    assertCurrentPdfLoad(loadVersion);
 
     const textContent = await page.getTextContent();
+    assertCurrentPdfLoad(loadVersion);
     const pageAnnotations = await page.getAnnotations({ intent: "display" });
+    assertCurrentPdfLoad(loadVersion);
+    pdfDocument.insertBefore(pageCanvas, playerSprite);
     const pagePlatforms = [];
     let textLineOrder = 0;
     textContent.items.forEach((item, itemIndex) => {
@@ -2775,6 +2857,7 @@ async function loadPdf(file) {
   });
   updateAnnotationControls();
   autoCenterPlayer();
+  return true;
 }
 
 function rectsOverlap(a, b) {
@@ -3721,38 +3804,32 @@ function tick() {
   requestAnimationFrame(tick);
 }
 
+async function loadTutorialPdfForLanguage(language = currentLanguage) {
+  if (userPdfLoaded || userPdfLoadPending) return;
+  const loadVersion = nextPdfLoadVersion();
+  try {
+    await loadPdf(tutorialPdfSource(language), loadVersion);
+  } catch (error) {
+    if (isStalePdfLoad(error)) return;
+    console.error(error);
+    resetAfterPdfLoadError();
+  }
+}
+
 async function handlePdfFile(file) {
   if (!file) return;
+  const loadVersion = nextPdfLoadVersion();
+  userPdfLoadVersion = loadVersion;
+  userPdfLoadPending = true;
   try {
-    await loadPdf(file);
+    const loaded = await loadPdf(file, loadVersion);
+    if (loaded) userPdfLoaded = true;
   } catch (error) {
+    if (isStalePdfLoad(error)) return;
     console.error(error);
-    setLoadingPdf(false);
-    world.loaded = false;
-    currentPdfBytes = null;
-    world.annotations = [];
-    world.messageAnnotations = [];
-    world.quizAnnotations = [];
-    world.removedPdfAnnotations = [];
-    world.spawnPlatformReadingIndex = null;
-    nextAnnotationOrder = 0;
-    annotationMenuMode = false;
-    selectedAnnotationIndex = 0;
-    annotationRadialActive = false;
-    annotationRadialChoice = null;
-    activeMessageAnnotationId = null;
-    removeActiveQuizEnemy();
-    renderQuizPrompt(null);
-    renderQuizAnswerLayer();
-    updateQuizPauseButtonLabel();
-    updateQuizToggleButtonLabel();
-    renderMessageDialog();
-    renderAnnotationRadial();
-    updateAnnotationControls();
-    renderAnnotationSidebar();
-    playerSprite.hidden = true;
-    setStatus("pdfReadError");
-    dropZone.classList.remove("is-hidden");
+    resetAfterPdfLoadError();
+  } finally {
+    if (userPdfLoadVersion === loadVersion) userPdfLoadPending = false;
   }
 }
 
@@ -3881,6 +3958,7 @@ messageDialog?.addEventListener("click", (event) => {
 languageSelect.addEventListener("change", () => {
   localStorage.setItem("bladeOfReadersLanguage", languageSelect.value);
   applyLanguage(languageSelect.value);
+  loadTutorialPdfForLanguage(languageSelect.value);
 });
 
 controlsPanel.addEventListener("click", (event) => {
@@ -3986,6 +4064,7 @@ if (window.visualViewport) {
 }
 
 applyLanguage(detectLanguage());
+loadTutorialPdfForLanguage(currentLanguage);
 if (window.ResizeObserver && topbar) {
   new ResizeObserver(updateStickyTopbarHeight).observe(topbar);
 }
