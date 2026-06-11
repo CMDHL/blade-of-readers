@@ -730,6 +730,15 @@ button:disabled {
 }
 
 .touch-controller-overlay {
+  --touch-edge-gap: clamp(10px, 2vw, 16px);
+  --touch-cluster-top: clamp(54px, 9vh, 72px);
+  --touch-bottom-gap: clamp(46px, 7vh, 62px);
+  --touch-button-size: clamp(58px, 15vh, 70px);
+  --touch-button-gap: clamp(6px, 1.4vw, 10px);
+  --touch-face-grid-size: calc(var(--touch-button-size) + var(--touch-button-size) + var(--touch-button-size) + var(--touch-button-gap) + var(--touch-button-gap));
+  --touch-shoulder-width: clamp(78px, 18vw, 104px);
+  --touch-shoulder-height: clamp(50px, 14vh, 62px);
+  --touch-stick-size: clamp(104px, 30vh, 132px);
   position: fixed;
   inset: 0;
   z-index: 45;
@@ -740,6 +749,31 @@ button:disabled {
 
 body.is-mobile-device:not(.has-external-controller) .touch-controller-overlay {
   display: block;
+}
+
+.touch-deadzone {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + var(--touch-cluster-top) - 12px);
+  bottom: calc(env(safe-area-inset-bottom) + var(--touch-bottom-gap) - 12px);
+  z-index: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.touch-deadzone-left {
+  left: env(safe-area-inset-left);
+  width: min(42vw, 340px);
+}
+
+.touch-deadzone-right {
+  right: env(safe-area-inset-right);
+  width: min(62vw, 360px);
 }
 
 .touch-control,
@@ -766,7 +800,7 @@ body.is-mobile-device:not(.has-external-controller) .touch-controller-overlay {
   min-height: 0;
   flex: 0 0 auto;
   padding: 0;
-  font-size: 0.78rem;
+  font-size: clamp(0.86rem, 2.2vw, 1rem);
   font-weight: 900;
 }
 
@@ -781,24 +815,26 @@ body.is-mobile-device:not(.has-external-controller) .touch-controller-overlay {
 
 .touch-shoulder-group {
   position: fixed;
-  top: calc(env(safe-area-inset-top) + 72px);
+  top: calc(env(safe-area-inset-top) + var(--touch-cluster-top));
+  z-index: 1;
   display: grid;
-  gap: 8px;
+  gap: var(--touch-button-gap);
   pointer-events: none;
 }
 
 .touch-shoulder-group-left {
-  left: calc(env(safe-area-inset-left) + 12px);
+  left: calc(env(safe-area-inset-left) + var(--touch-edge-gap));
 }
 
 .touch-shoulder-group-right {
-  right: calc(env(safe-area-inset-right) + 12px);
+  right: calc(env(safe-area-inset-right) + var(--touch-edge-gap));
+  grid-template-columns: repeat(2, var(--touch-shoulder-width));
 }
 
 .touch-shoulder,
 .touch-view {
-  width: 58px;
-  height: 42px;
+  width: var(--touch-shoulder-width);
+  height: var(--touch-shoulder-height);
   border-radius: 8px;
 }
 
@@ -808,19 +844,20 @@ body.is-mobile-device:not(.has-external-controller) .touch-controller-overlay {
 
 .touch-stick {
   position: fixed;
-  width: clamp(82px, 20vw, 112px);
+  z-index: 1;
+  width: var(--touch-stick-size);
   aspect-ratio: 1;
   border-radius: 50%;
 }
 
 .touch-stick-left {
-  left: calc(env(safe-area-inset-left) + clamp(16px, 13vw, 92px));
-  bottom: calc(env(safe-area-inset-bottom) + 62px);
+  left: calc(env(safe-area-inset-left) + var(--touch-edge-gap));
+  bottom: calc(env(safe-area-inset-bottom) + var(--touch-bottom-gap));
 }
 
 .touch-stick-right {
-  right: calc(env(safe-area-inset-right) + clamp(116px, 25vw, 184px));
-  bottom: calc(env(safe-area-inset-bottom) + clamp(168px, 34vh, 242px));
+  right: calc(env(safe-area-inset-right) + var(--touch-edge-gap) + clamp(92px, 24vw, 116px));
+  bottom: calc(env(safe-area-inset-bottom) + var(--touch-face-grid-size) + clamp(42px, 8vh, 66px));
 }
 
 .touch-stick::before {
@@ -858,21 +895,22 @@ body.is-mobile-device:not(.has-external-controller) .touch-controller-overlay {
 
 .touch-face-buttons {
   position: fixed;
-  right: calc(env(safe-area-inset-right) + 16px);
-  bottom: calc(env(safe-area-inset-bottom) + 54px);
-  width: 146px;
-  height: 146px;
+  right: calc(env(safe-area-inset-right) + var(--touch-edge-gap));
+  bottom: calc(env(safe-area-inset-bottom) + var(--touch-bottom-gap));
+  z-index: 1;
+  width: var(--touch-face-grid-size);
+  height: var(--touch-face-grid-size);
   display: grid;
-  grid-template-columns: repeat(3, 48px);
-  grid-template-rows: repeat(3, 48px);
+  grid-template-columns: repeat(3, var(--touch-button-size));
+  grid-template-rows: repeat(3, var(--touch-button-size));
   place-content: center;
-  gap: 1px;
+  gap: var(--touch-button-gap);
   pointer-events: none;
 }
 
 .touch-face {
-  width: 48px;
-  height: 48px;
+  width: var(--touch-button-size);
+  height: var(--touch-button-size);
   border-radius: 50%;
 }
 
@@ -894,6 +932,21 @@ body.is-mobile-device:not(.has-external-controller) .touch-controller-overlay {
 .touch-face-a {
   grid-column: 2;
   grid-row: 3;
+}
+
+@media (orientation: landscape) {
+  .touch-shoulder-group-left {
+    grid-template-columns: repeat(3, var(--touch-shoulder-width));
+  }
+
+  .touch-stick-left {
+    left: calc(env(safe-area-inset-left) + clamp(48px, 11vw, 92px));
+  }
+
+  .touch-stick-right {
+    right: calc(env(safe-area-inset-right) + var(--touch-edge-gap) + var(--touch-face-grid-size) + var(--touch-button-gap));
+    bottom: calc(env(safe-area-inset-bottom) + var(--touch-bottom-gap));
+  }
 }
 
 body.is-mobile-device {

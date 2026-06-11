@@ -3854,6 +3854,11 @@ function releaseVirtualStick(pointerId) {
 function handleVirtualControllerPointerDown(event) {
   const target = pointerTargetElement(event);
   if (!target) return;
+  if (target.closest(".touch-deadzone")) {
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
   const button = target.closest("[data-virtual-button]");
   const stick = target.closest("[data-virtual-stick]");
   if (!button && !stick) return;
