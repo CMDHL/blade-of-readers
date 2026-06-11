@@ -166,6 +166,7 @@ let currentPdfName = "document.pdf";
 let topbarHidden = false;
 let annotationMenuMode = false;
 let selectedAnnotationIndex = 0;
+let nextAnnotationOrder = 0;
 let annotationRadialActive = false;
 let annotationRadialChoice = null;
 const textSelection = {
@@ -912,6 +913,142 @@ function textFromPlatforms(platforms) {
     .join("\n");
 }
 
+function annotationStableOrder(annotation) {
+  if (!Number.isFinite(annotation.sortOrder)) {
+    annotation.sortOrder = nextAnnotationOrder;
+    nextAnnotationOrder += 1;
+  }
+  return annotation.sortOrder;
+}
+
+function readingIndexRange(platforms) {
+  const indexes = platforms
+    .map((platform) => platform.readingIndex)
+    .filter(Number.isFinite);
+  if (!indexes.length) return null;
+  return {
+    start: Math.min(...indexes),
+    end: Math.max(...indexes),
+  };
+}
+
+function setAnnotationPlatformRange(annotation, platforms) {
+  const range = readingIndexRange(platforms);
+  if (range && annotation) {
+    annotation.startReadingIndex = range.start;
+    annotation.endReadingIndex = range.end;
+  }
+  return range;
+}
+
+function annotationReadingIndexRange(annotation) {
+  if (
+    Number.isFinite(annotation?.startReadingIndex)
+    && Number.isFinite(annotation?.endReadingIndex)
+  ) {
+    return {
+      start: annotation.startReadingIndex,
+      end: annotation.endReadingIndex,
+    };
+  }
+
+  return setAnnotationPlatformRange(annotation, platformsFromAnnotationRects(annotation?.rects || []));
+}
+
+function annotationPlatforms(annotation) {
+  const range = annotationReadingIndexRange(annotation);
+  if (range) {
+    return world.platforms.filter((platform) => (
+      Number.isFinite(platform.readingIndex)
+      && platform.readingIndex >= range.start
+      && platform.readingIndex <= range.end
+    ));
+  }
+  return platformsFromAnnotationRects(annotation?.rects || []);
+}
+
+function platformAtReadingIndex(readingIndex) {
+  if (!Number.isFinite(readingIndex)) return null;
+  return world.platforms.find((platform) => platform.readingIndex === readingIndex) || null;
+}
+
+function annotationStartPlatform(annotation) {
+  const range = annotationReadingIndexRange(annotation);
+  const rangeStartPlatform = platformAtReadingIndex(range?.start);
+  if (rangeStartPlatform) return rangeStartPlatform;
+
+  return annotationPlatforms(annotation).reduce((first, platform) => {
+    if (!Number.isFinite(platform.readingIndex)) return first;
+    if (!first || platform.readingIndex < first.readingIndex) return platform;
+    return first;
+  }, null);
+}
+
+function firstAnnotationRect(annotation) {
+  return [...(annotation?.rects || [])]
+    .filter((rect) => Number.isFinite(rect.page) && Number.isFinite(rect.x) && Number.isFinite(rect.y))
+    .sort((a, b) => a.page - b.page || a.y - b.y || a.x - b.x)[0] || null;
+}
+
+function annotationStartRect(annotation) {
+  const platform = annotationStartPlatform(annotation);
+  if (platform) {
+    return {
+      page: platform.page,
+      x: platform.x,
+      y: platform.y,
+      width: platform.width,
+      height: platform.height,
+    };
+  }
+  return firstAnnotationRect(annotation);
+}
+
+function annotationStartLocation(annotation) {
+  const platform = annotationStartPlatform(annotation);
+  if (platform) {
+    return {
+      page: platform.page,
+      y: platform.y,
+      x: platform.x,
+      readingIndex: platform.readingIndex,
+      order: annotationStableOrder(annotation),
+    };
+  }
+
+  const rect = firstAnnotationRect(annotation);
+  return {
+    page: rect?.page ?? Number.POSITIVE_INFINITY,
+    y: rect?.y ?? Number.POSITIVE_INFINITY,
+    x: rect?.x ?? Number.POSITIVE_INFINITY,
+    readingIndex: Number.POSITIVE_INFINITY,
+    order: annotationStableOrder(annotation),
+  };
+}
+
+function compareAnnotationsByStart(a, b) {
+  const startA = annotationStartLocation(a);
+  const startB = annotationStartLocation(b);
+  const hasReadingIndexA = Number.isFinite(startA.readingIndex);
+  const hasReadingIndexB = Number.isFinite(startB.readingIndex);
+  if (hasReadingIndexA && hasReadingIndexB && startA.readingIndex !== startB.readingIndex) {
+    return startA.readingIndex - startB.readingIndex;
+  }
+  if (hasReadingIndexA !== hasReadingIndexB) return hasReadingIndexA ? -1 : 1;
+
+  return startA.page - startB.page
+    || startA.order - startB.order;
+}
+
+function sortAnnotationsByStart(preserveId = null) {
+  world.annotations.forEach(annotationStableOrder);
+  world.annotations.sort(compareAnnotationsByStart);
+  if (preserveId) {
+    const selectedIndex = world.annotations.findIndex((annotation) => annotation.id === preserveId);
+    if (selectedIndex >= 0) selectedAnnotationIndex = selectedIndex;
+  }
+}
+
 function rectsForLineGroups(lineGroups) {
   return lineGroups.flatMap((group) => {
     if (!group.platforms.length) return [];
@@ -1037,6 +1174,7 @@ function addAnnotationFromSelection(comment = "") {
   const selectionPlatforms = selectedPlatforms();
   const rects = rectsForLineGroups(lineGroupsForPlatforms(selectionPlatforms));
   if (!selectionPlatforms.length || !rects.length) return false;
+  const range = readingIndexRange(selectionPlatforms);
 
   world.annotations.push({
     id: createAnnotationId(),
@@ -1046,8 +1184,12 @@ function addAnnotationFromSelection(comment = "") {
     comment: comment.trim(),
     rects,
     marker: annotationMarkerFromSelection(selectionPlatforms, rects),
+    startReadingIndex: range?.start,
+    endReadingIndex: range?.end,
+    sortOrder: nextAnnotationOrder,
     createdAt: new Date().toISOString(),
   });
+  nextAnnotationOrder += 1;
   renderAnnotationLayer();
   renderAnnotationSidebar();
   clearTextSelection();
@@ -1121,8 +1263,22 @@ function clampSelectedAnnotationIndex() {
   selectedAnnotationIndex = Math.max(0, Math.min(selectedAnnotationIndex, world.annotations.length - 1));
 }
 
+function scrollSelectedAnnotationIntoView() {
+  const entry = annotationList
+    ?.querySelector(`[data-annotation-index="${selectedAnnotationIndex}"]`);
+  if (!entry) return;
+
+  const entryRect = entry.getBoundingClientRect();
+  const listRect = annotationList.getBoundingClientRect();
+  if (entryRect.top < listRect.top || entryRect.bottom > listRect.bottom) {
+    entry.scrollIntoView({ block: "nearest" });
+  }
+}
+
 function renderAnnotationSidebar() {
   if (!annotationList) return;
+  const selectedId = world.annotations[selectedAnnotationIndex]?.id || null;
+  sortAnnotationsByStart(selectedId);
   clampSelectedAnnotationIndex();
   annotationSidebar.classList.toggle("is-menu-mode", annotationMenuMode);
   annotationModeLabel.textContent = t(annotationMenuMode ? "menuMode" : "gameMode");
@@ -1158,9 +1314,7 @@ function renderAnnotationSidebar() {
     annotationList.append(entry);
   });
 
-  annotationList
-    .querySelector(`[data-annotation-index="${selectedAnnotationIndex}"]`)
-    ?.scrollIntoView({ block: "nearest" });
+  scrollSelectedAnnotationIntoView();
 }
 
 function setAnnotationMenuMode(isActive) {
@@ -1173,6 +1327,7 @@ function setAnnotationMenuMode(isActive) {
   }
   clampSelectedAnnotationIndex();
   renderAnnotationSidebar();
+  if (annotationMenuMode) focusSelectedAnnotation();
   setStatus(annotationMenuMode ? "menuModeOn" : "menuModeOff");
 }
 
@@ -1184,6 +1339,7 @@ function selectAnnotationEntry(delta) {
   if (!world.annotations.length) return;
   selectedAnnotationIndex = (selectedAnnotationIndex + delta + world.annotations.length) % world.annotations.length;
   renderAnnotationSidebar();
+  if (annotationMenuMode) focusSelectedAnnotation();
 }
 
 function selectedAnnotation() {
@@ -1193,7 +1349,7 @@ function selectedAnnotation() {
 
 function focusSelectedAnnotation() {
   const annotation = selectedAnnotation();
-  const rect = annotation?.rects?.[0];
+  const rect = annotationStartRect(annotation);
   if (!rect || !world.loaded) return;
 
   player.x = Math.max(0, Math.min(world.cssWidth - player.width, rect.x));
@@ -1234,6 +1390,7 @@ function deleteSelectedAnnotation() {
   clampSelectedAnnotationIndex();
   renderAnnotationLayer();
   renderAnnotationSidebar();
+  if (annotationMenuMode) focusSelectedAnnotation();
   setStatus("annotationDeleted");
 }
 
@@ -1379,6 +1536,7 @@ function isHighlightAnnotation(annotation) {
 
 function importPdfAnnotations() {
   world.annotations = [];
+  nextAnnotationOrder = 0;
 
   for (const page of world.pages) {
     for (const annotation of page.annotations || []) {
@@ -1388,6 +1546,8 @@ function importPdfAnnotations() {
       const fallbackRect = pdfRectToWorldRect(page, annotation.rect);
       if (!rects.length && fallbackRect) rects.push(fallbackRect);
       if (!rects.length) continue;
+      const matchedPlatforms = platformsFromAnnotationRects(rects);
+      const range = readingIndexRange(matchedPlatforms);
 
       world.annotations.push({
         id: annotation.id || createAnnotationId(),
@@ -1397,11 +1557,15 @@ function importPdfAnnotations() {
         pdfPage: page.number,
         pdfRect: Array.isArray(annotation.rect) ? [...annotation.rect] : [],
         pdfQuadPoints,
-        text: textFromAnnotationRects(rects),
+        text: textFromPlatforms(matchedPlatforms),
         comment: annotationText(annotation.contentsObj) || annotationText(annotation.contents),
         rects,
+        startReadingIndex: range?.start,
+        endReadingIndex: range?.end,
+        sortOrder: nextAnnotationOrder,
         createdAt: annotation.modificationDate || "",
       });
+      nextAnnotationOrder += 1;
     }
   }
 }
@@ -1835,6 +1999,7 @@ async function loadPdf(file) {
   currentPdfName = file?.name || "document.pdf";
   world.annotations = [];
   world.removedPdfAnnotations = [];
+  nextAnnotationOrder = 0;
   annotationMenuMode = false;
   selectedAnnotationIndex = 0;
   annotationRadialActive = false;
@@ -1857,6 +2022,7 @@ async function loadPdf(file) {
   world.portals = [];
   world.annotations = [];
   world.removedPdfAnnotations = [];
+  nextAnnotationOrder = 0;
   world.activePlatformLineId = null;
   world.minTextHeight = Infinity;
 
@@ -1992,12 +2158,16 @@ function platformOverlapsAnnotationRect(platform, rect) {
   return areaCoverage >= 0.2 || (horizontalCoverage >= 0.45 && verticalCoverage >= 0.35);
 }
 
-function textFromAnnotationRects(rects) {
-  if (!rects?.length) return "";
-  const platforms = world.platforms.filter((platform) => (
-    rects.some((rect) => platformOverlapsAnnotationRect(platform, rect))
-  ));
-  return textFromPlatforms(platforms);
+function platformsFromAnnotationRects(rects) {
+  if (!rects?.length) return [];
+  return world.platforms
+    .filter((platform) => rects.some((rect) => platformOverlapsAnnotationRect(platform, rect)))
+    .sort((a, b) => (
+      (a.readingIndex ?? Number.POSITIVE_INFINITY) - (b.readingIndex ?? Number.POSITIVE_INFINITY)
+      || a.page - b.page
+      || a.y - b.y
+      || a.x - b.x
+    ));
 }
 
 function eventPathIncludesElement(event, element) {
@@ -2114,6 +2284,69 @@ function playerSupportedByPlatform(platform) {
   return player.grounded && centeredOnPlatform && standingOnPlatform;
 }
 
+function supportedTextPlatforms() {
+  return activeCollisionPlatforms()
+    .filter(playerSupportedByPlatform)
+    .sort((a, b) => (
+      (a.readingIndex ?? Number.POSITIVE_INFINITY) - (b.readingIndex ?? Number.POSITIVE_INFINITY)
+      || a.page - b.page
+      || a.y - b.y
+      || a.x - b.x
+    ));
+}
+
+function annotationIncludesPlatform(annotation, platform) {
+  if (!platform) return false;
+  const range = annotationReadingIndexRange(annotation);
+  if (range && Number.isFinite(platform.readingIndex)) {
+    return platform.readingIndex >= range.start && platform.readingIndex <= range.end;
+  }
+  return annotationPlatforms(annotation).includes(platform);
+}
+
+function annotationDistanceToPlayerLocation(annotation, platforms) {
+  const start = annotationStartLocation(annotation);
+  const readingDistances = platforms
+    .map((platform) => (
+      Number.isFinite(start.readingIndex) && Number.isFinite(platform.readingIndex)
+        ? Math.abs(start.readingIndex - platform.readingIndex)
+        : null
+    ))
+    .filter(Number.isFinite);
+  if (readingDistances.length) return Math.min(...readingDistances);
+
+  const playerX = player.x + player.width / 2;
+  const playerY = player.y + player.height;
+  const dx = (Number.isFinite(start.x) ? start.x : playerX) - playerX;
+  const dy = (Number.isFinite(start.y) ? start.y : playerY) - playerY;
+  return Math.hypot(dx, dy);
+}
+
+function syncSelectedAnnotationFromPlayer() {
+  if (annotationMenuMode || !world.annotations.length) return;
+  const platforms = supportedTextPlatforms();
+  if (!platforms.length) return;
+
+  sortAnnotationsByStart(world.annotations[selectedAnnotationIndex]?.id || null);
+  let best = null;
+  world.annotations.forEach((annotation, index) => {
+    const matchedPlatforms = platforms.filter((platform) => annotationIncludesPlatform(annotation, platform));
+    if (!matchedPlatforms.length) return;
+    const distance = annotationDistanceToPlayerLocation(annotation, matchedPlatforms);
+    if (!best || distance < best.distance || (distance === best.distance && index < best.index)) {
+      best = { index, distance };
+    }
+  });
+
+  if (!best) return;
+  if (selectedAnnotationIndex !== best.index) {
+    selectedAnnotationIndex = best.index;
+    renderAnnotationSidebar();
+  } else {
+    scrollSelectedAnnotationIntoView();
+  }
+}
+
 function useWrapPortal(previousX) {
   for (const portal of activeWrapPortals()) {
     if (Math.sign(player.vx) !== portal.direction) continue;
@@ -2199,6 +2432,7 @@ function updatePlayer() {
 
   if (autoScrollEnabled && !usedPortal) keepPlayerInVisibleWindow();
   updateActivePage();
+  syncSelectedAnnotationFromPlayer();
   autoCenterPlayer();
 }
 
@@ -2414,6 +2648,7 @@ async function handlePdfFile(file) {
     currentPdfBytes = null;
     world.annotations = [];
     world.removedPdfAnnotations = [];
+    nextAnnotationOrder = 0;
     annotationMenuMode = false;
     selectedAnnotationIndex = 0;
     annotationRadialActive = false;
@@ -2498,7 +2733,6 @@ annotationList.addEventListener("click", (event) => {
   if (!entry) return;
   selectedAnnotationIndex = Number(entry.dataset.annotationIndex) || 0;
   setAnnotationMenuMode(true);
-  focusSelectedAnnotation();
 });
 
 downloadAnnotatedButton.addEventListener("click", () => {
