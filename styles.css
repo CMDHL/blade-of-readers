@@ -445,11 +445,8 @@ button:disabled {
   background: rgba(255, 209, 31, 0.4);
 }
 
-.pdf-annotation-highlight.has-comment::after {
-  content: "";
+.pdf-annotation-comment-marker {
   position: absolute;
-  top: -2px;
-  right: -2px;
   width: 6px;
   height: 6px;
   border-radius: 999px;
