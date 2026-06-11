@@ -241,6 +241,24 @@ button:disabled {
   font-weight: 700;
 }
 
+.control-row.is-interaction-ready {
+  color: var(--accent-dark);
+  font-weight: 900;
+}
+
+.control-row.is-interaction-ready > span:first-child {
+  color: var(--accent-dark);
+}
+
+.control-row.is-interaction-ready button {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  box-shadow:
+    0 0 0 2px rgba(25, 118, 111, 0.16),
+    0 2px 0 rgba(23, 25, 31, 0.08);
+}
+
 .fixed-control {
   display: inline-flex;
   align-items: center;
@@ -368,10 +386,10 @@ button:disabled {
   font-size: 0.88rem;
   line-height: 1.35;
   text-align: left;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  overflow-wrap: normal;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   word-break: normal;
 }
 
@@ -459,10 +477,96 @@ button:disabled {
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.84);
 }
 
+.pdf-message-platform-highlight {
+  position: absolute;
+  border-radius: 2px;
+  background: rgba(93, 95, 239, 0.28);
+  outline: 1px solid rgba(64, 66, 178, 0.46);
+}
+
 .selection-highlight {
   position: absolute;
   border-radius: 2px;
   background: rgba(0, 95, 255, 0.32);
+}
+
+.message-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(23, 25, 31, 0.36);
+  backdrop-filter: blur(4px);
+}
+
+.message-dialog-backdrop[hidden] {
+  display: none;
+}
+
+.message-dialog-panel {
+  width: min(540px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid rgba(23, 25, 31, 0.18);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 20px 70px rgba(23, 25, 31, 0.28);
+}
+
+.message-dialog-panel h2 {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.2;
+  letter-spacing: 0;
+  text-align: center;
+}
+
+.message-dialog-text {
+  width: 100%;
+  max-height: min(42vh, 280px);
+  overflow: auto;
+  color: var(--ink);
+  font-size: 1.12rem;
+  line-height: 1.56;
+  text-align: center;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.message-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.message-dialog-actions button {
+  min-width: 0;
+  min-height: 34px;
+  flex: 0 1 auto;
+  padding-inline: 10px;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.message-dialog-actions button.is-selected {
+  border-color: rgba(25, 118, 111, 0.78);
+  outline: 2px solid rgba(25, 118, 111, 0.18);
+}
+
+.message-dialog-actions button.is-choice-selected[data-message-dialog-action="good"] {
+  border-color: rgba(25, 118, 111, 0.72);
+  background: rgba(25, 118, 111, 0.12);
+  color: var(--accent-dark);
+}
+
+.message-dialog-actions button.is-choice-selected[data-message-dialog-action="bad"] {
+  border-color: rgba(186, 59, 70, 0.72);
+  background: rgba(186, 59, 70, 0.12);
+  color: var(--danger);
 }
 
 .annotation-radial {
@@ -763,6 +867,10 @@ button:disabled {
   .upload-button,
   button {
     flex: 1 1 130px;
+  }
+
+  .message-dialog-actions button {
+    flex: 0 1 auto;
   }
 
   .reader-layout {

@@ -34,6 +34,7 @@
             </label>
             <button id="downloadAnnotatedButton" type="button" data-i18n="downloadAnnotated" disabled>Download Annotated PDF</button>
             <button id="collisionButton" type="button" aria-pressed="false" data-i18n="showCollisions">Show Collisions</button>
+            <button id="messageAnnotationsButton" type="button" aria-pressed="true" data-i18n="hideMessages">Hide Messages</button>
             <button id="resetButton" type="button" data-i18n="reset">Reset</button>
           </div>
         </div>
@@ -70,6 +71,10 @@
               <button type="button" data-map-device="keyboard" data-map-action="dash"></button>
             </div>
             <div class="control-row">
+              <span data-i18n="interact">Interact</span>
+              <button type="button" data-map-device="keyboard" data-map-action="interact"></button>
+            </div>
+            <div class="control-row">
               <span data-i18n="copySelection">Copy</span>
               <button type="button" data-map-device="keyboard" data-map-action="copySelection"></button>
             </div>
@@ -100,6 +105,10 @@
             <div class="control-row">
               <span data-i18n="dash">Dash</span>
               <button type="button" data-map-device="controller" data-map-action="dash"></button>
+            </div>
+            <div class="control-row">
+              <span data-i18n="interact">Interact</span>
+              <button type="button" data-map-device="controller" data-map-action="interact"></button>
             </div>
             <div class="control-row">
               <span data-i18n="annotationActions">Actions</span>
@@ -134,7 +143,7 @@
           <div id="dropZone" class="drop-zone">
             <strong data-i18n="dropTitle">Upload a PDF to generate the level</strong>
             <span data-i18n="dropDescription">Words and punctuation-separated chunks become invisible platforms at the text itself.</span>
-            <span class="keys" data-i18n="keysHelp">Attack selects text · V/H/J copy, highlight, comment · Click entries to jump</span>
+            <span class="keys" data-i18n="keysHelp">Attack selects text · E interacts · V/H/J copy, highlight, comment · Click entries to jump</span>
           </div>
         </section>
       </div>
@@ -144,6 +153,18 @@
         <div class="annotation-radial-option option-copy" data-radial-choice="copySelection" data-i18n="copySelection">Copy</div>
         <div class="annotation-radial-option option-highlight" data-radial-choice="highlightSelection" data-i18n="highlightSelection">Highlight</div>
         <div class="annotation-radial-option option-comment" data-radial-choice="commentSelection" data-i18n="commentSelection">Comment</div>
+      </div>
+
+      <div id="messageDialog" class="message-dialog-backdrop" role="dialog" aria-modal="true" aria-labelledby="messageDialogTitle" hidden>
+        <div class="message-dialog-panel">
+          <h2 id="messageDialogTitle" data-i18n="messageDialogTitle">Message</h2>
+          <div id="messageDialogText" class="message-dialog-text"></div>
+          <div class="message-dialog-actions">
+            <button id="messageCloseButton" type="button" data-message-dialog-action="close" data-i18n="closeMessage">Close</button>
+            <button id="messageGoodButton" type="button" data-message-dialog-action="good"></button>
+            <button id="messageBadButton" type="button" data-message-dialog-action="bad"></button>
+          </div>
+        </div>
       </div>
 
       <footer class="statusbar">

@@ -16,11 +16,14 @@ const annotationRadial = document.querySelector("#annotationRadial");
 const resetButton = document.querySelector("#resetButton");
 const controlsPanel = document.querySelector("#controlsPanel");
 const collisionButton = document.querySelector("#collisionButton");
+const messageAnnotationsButton = document.querySelector("#messageAnnotationsButton");
 const languageSelect = document.querySelector("#languageSelect");
 const dropZone = document.querySelector("#dropZone");
 const loadingOverlay = document.querySelector("#loadingOverlay");
 const statusText = document.querySelector("#statusText");
 const pageText = document.querySelector("#pageText");
+const messageDialog = document.querySelector("#messageDialog");
+const messageDialogText = document.querySelector("#messageDialogText");
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_SRC;
 
@@ -44,6 +47,7 @@ const keyMap = {
   down: ["ArrowDown", "KeyS"],
   jump: ["Space", "KeyZ"],
   dash: ["ShiftLeft", "ShiftRight", "KeyC"],
+  interact: ["KeyE"],
   attack: ["KeyX"],
   copySelection: ["KeyV"],
   highlightSelection: ["KeyH"],
@@ -54,6 +58,7 @@ const controllerMap = {
   jump: [0],
   attack: [2],
   dash: [7],
+  interact: [1],
   menu: [8],
 };
 
@@ -91,6 +96,7 @@ const world = {
   platforms: [],
   portals: [],
   annotations: [],
+  messageAnnotations: [],
   removedPdfAnnotations: [],
   loaded: false,
   renderWidth: 900,
@@ -156,6 +162,7 @@ let remappingAction = null;
 let remappingDevice = null;
 let controllerRemapBaseline = new Set();
 let collisionsVisible = false;
+let messageAnnotationsVisible = true;
 let autoScrollEnabled = true;
 let programmaticScrollUntil = 0;
 let currentLanguage = "en";
@@ -169,6 +176,8 @@ let selectedAnnotationIndex = 0;
 let nextAnnotationOrder = 0;
 let annotationRadialActive = false;
 let annotationRadialChoice = null;
+let activeMessageAnnotationId = null;
+let messageDialogChoiceIndex = 0;
 const textSelection = {
   anchorPlatform: null,
   startIndex: null,
@@ -191,6 +200,8 @@ const translations = {
     showTopbar: "Show Top",
     hideCollisions: "Hide Collisions",
     showCollisions: "Show Collisions",
+    hideMessages: "Hide Messages",
+    showMessages: "Show Messages",
     reset: "Reset",
     controlsLabel: "Key mapping",
     keyboardControls: "Keyboard",
@@ -203,6 +214,7 @@ const translations = {
     down: "Down",
     jump: "Jump",
     dash: "Dash",
+    interact: "Interact",
     attack: "Attack",
     menu: "Menu",
     annotationActions: "Actions",
@@ -222,7 +234,15 @@ const translations = {
     readerStageLabel: "PDF platformer",
     dropTitle: "Upload a PDF to generate the level",
     dropDescription: "Words and punctuation-separated chunks become invisible platforms at the text itself.",
-    keysHelp: "Attack selects text. V/H/J or LB + right stick handles copy, highlight, and comment. Click entries to jump, attack in menu mode removes one.",
+    keysHelp: "Attack selects text. E or B opens messages. V/H/J or LB + right stick handles copy, highlight, and comment. Click entries to jump, attack in menu mode removes one.",
+    messageDialogTitle: "Message",
+    closeMessage: "Close",
+    goodMessage: "Good",
+    badMessage: "Bad",
+    messageOpened: "Message opened.",
+    messageChoiceSaved: "{choice} response recorded.",
+    messageChoiceGood: "Good",
+    messageChoiceBad: "Bad",
     loadingTitle: "Loading PDF...",
     loadingDescription: "Preparing the level before switching views.",
     waiting: "Waiting for a PDF.",
@@ -259,6 +279,8 @@ const translations = {
     showTopbar: "显示顶部",
     hideCollisions: "隐藏碰撞",
     showCollisions: "显示碰撞",
+    hideMessages: "隐藏消息",
+    showMessages: "显示消息",
     reset: "重置",
     controlsLabel: "按键映射",
     keyboardControls: "键盘",
@@ -271,6 +293,7 @@ const translations = {
     down: "下",
     jump: "跳跃",
     dash: "冲刺",
+    interact: "互动",
     attack: "攻击",
     menu: "菜单",
     annotationActions: "操作",
@@ -290,7 +313,15 @@ const translations = {
     readerStageLabel: "PDF 平台关卡",
     dropTitle: "上传 PDF 生成关卡",
     dropDescription: "单词和由标点分隔的文本片段会在原文位置变成隐形平台。",
-    keysHelp: "攻击选择文字。V/H/J 或 LB + 右摇杆可复制、高亮、评论。点击条目可跳转，攻击删除条目。",
+    keysHelp: "攻击选择文字。E 或 B 打开消息。V/H/J 或 LB + 右摇杆可复制、高亮、评论。点击条目可跳转，攻击删除条目。",
+    messageDialogTitle: "消息",
+    closeMessage: "关闭",
+    goodMessage: "赞同",
+    badMessage: "反对",
+    messageOpened: "已打开消息。",
+    messageChoiceSaved: "已记录{choice}回应。",
+    messageChoiceGood: "赞同",
+    messageChoiceBad: "反对",
     loadingTitle: "正在加载 PDF...",
     loadingDescription: "正在准备关卡，完成后会切换显示。",
     waiting: "等待上传 PDF。",
@@ -344,6 +375,10 @@ function updateCollisionButtonLabel() {
   collisionButton.textContent = collisionsVisible ? t("hideCollisions") : t("showCollisions");
 }
 
+function updateMessageAnnotationsButtonLabel() {
+  messageAnnotationsButton.textContent = messageAnnotationsVisible ? t("hideMessages") : t("showMessages");
+}
+
 function updateTopbarToggleButton() {
   const key = topbarHidden ? "showTopbar" : "hideTopbar";
   topbarToggleButton.dataset.i18n = key;
@@ -379,11 +414,13 @@ function applyLanguage(language) {
   statusText.textContent = t(currentStatus.key, currentStatus.values);
   updatePageText();
   updateCollisionButtonLabel();
+  updateMessageAnnotationsButtonLabel();
   updateTopbarToggleButton();
   updateControlLabels();
   updateAnnotationControls();
   renderAnnotationSidebar();
   renderAnnotationRadial();
+  renderMessageDialog();
 }
 
 function actionPressed(action) {
@@ -1107,6 +1144,40 @@ function annotationMarkerPosition(annotation) {
   return firstRect ? { page: firstRect.page, x: firstRect.x, y: firstRect.y } : null;
 }
 
+function parseMessageAnnotationComment(comment) {
+  const match = String(comment || "").match(/^\[msg\|(\d+)\|(\d+)(?:\|([+-]))?\]([\s\S]*)$/u);
+  if (!match) return null;
+  return {
+    goodBase: Number.parseInt(match[1], 10),
+    badBase: Number.parseInt(match[2], 10),
+    choice: match[3] === "+" ? "good" : match[3] === "-" ? "bad" : null,
+    text: match[4],
+  };
+}
+
+function messageChoiceSymbol(choice) {
+  if (choice === "good") return "+";
+  if (choice === "bad") return "-";
+  return "";
+}
+
+function formatMessageAnnotationComment(annotation) {
+  const choice = messageChoiceSymbol(annotation.messageChoice);
+  const choiceTag = choice ? `|${choice}` : "";
+  return `[msg|${annotation.messageGoodBase}|${annotation.messageBadBase}${choiceTag}]${annotation.messageText || ""}`;
+}
+
+function messageDisplayCounts(annotation) {
+  return {
+    good: annotation.messageGoodBase + (annotation.messageChoice === "good" ? 1 : 0),
+    bad: annotation.messageBadBase + (annotation.messageChoice === "bad" ? 1 : 0),
+  };
+}
+
+function messageVoteChanged(annotation) {
+  return annotation.messageChoice !== annotation.messageOriginalChoice;
+}
+
 function selectedText() {
   return textFromPlatforms(selectedPlatforms());
 }
@@ -1198,7 +1269,8 @@ function addAnnotationFromSelection(comment = "") {
 
 function renderAnnotationLayer() {
   pdfDocument.querySelector(".annotation-layer")?.remove();
-  if (!world.loaded || !world.annotations.length) return;
+  const hasVisibleMessages = messageAnnotationsVisible && world.messageAnnotations.length > 0;
+  if (!world.loaded || (!world.annotations.length && !hasVisibleMessages)) return;
 
   const layer = document.createElement("div");
   layer.className = "annotation-layer";
@@ -1228,9 +1300,27 @@ function renderAnnotationLayer() {
     }
   }
 
+  if (messageAnnotationsVisible) {
+    for (const annotation of world.messageAnnotations) {
+      const platforms = messageHostPlatforms(annotation);
+      if (!platforms.length) continue;
+      const title = compactText(firstContentLine(annotation.messageText), 72);
+      for (const rect of rectsForLineGroups(lineGroupsForPlatforms(platforms))) {
+        const highlight = document.createElement("div");
+        highlight.className = "pdf-message-platform-highlight";
+        highlight.style.transform = `translate(${rect.x}px, ${rect.y}px)`;
+        highlight.style.width = `${rect.width}px`;
+        highlight.style.height = `${rect.height}px`;
+        highlight.title = title;
+        layer.append(highlight);
+      }
+    }
+  }
+
   const selectionLayer = pdfDocument.querySelector(".selection-layer");
   const collisionLayer = pdfDocument.querySelector(".collision-layer");
   pdfDocument.insertBefore(layer, selectionLayer || collisionLayer || playerSprite);
+  updateMessageInteractionHint();
 }
 
 function annotationFirstPage(annotation) {
@@ -1394,6 +1484,162 @@ function deleteSelectedAnnotation() {
   setStatus("annotationDeleted");
 }
 
+function messageHostPlatforms(annotation) {
+  return annotationPlatforms(annotation);
+}
+
+function supportedPlatformsForAnnotation(annotation, platforms) {
+  return platforms.filter((platform) => annotationIncludesPlatform(annotation, platform));
+}
+
+function messageCandidateScore(annotation, platforms, index) {
+  const matchedPlatforms = supportedPlatformsForAnnotation(annotation, platforms);
+  if (!matchedPlatforms.length) return null;
+  return {
+    annotation,
+    distance: annotationDistanceToPlayerLocation(annotation, matchedPlatforms),
+    index,
+  };
+}
+
+function supportedMessageAnnotation() {
+  if (!world.loaded || !messageAnnotationsVisible) return null;
+  const platforms = supportedTextPlatforms();
+  if (!platforms.length) return null;
+
+  return world.messageAnnotations
+    .map((annotation, index) => messageCandidateScore(annotation, platforms, index))
+    .filter(Boolean)
+    .sort((a, b) => a.distance - b.distance || a.index - b.index)[0]?.annotation || null;
+}
+
+function interactableMessageAnnotation() {
+  if (activeMessageAnnotationId) return null;
+  return supportedMessageAnnotation();
+}
+
+function activeMessageAnnotation() {
+  return world.messageAnnotations.find((annotation) => annotation.id === activeMessageAnnotationId) || null;
+}
+
+function messageDialogActions() {
+  return ["close", "good", "bad"];
+}
+
+function clampMessageDialogChoiceIndex() {
+  const actions = messageDialogActions();
+  messageDialogChoiceIndex = Math.max(0, Math.min(messageDialogChoiceIndex, actions.length - 1));
+}
+
+function renderMessageDialog() {
+  if (!messageDialog) return;
+  const annotation = activeMessageAnnotation();
+  if (!annotation) {
+    messageDialog.hidden = true;
+    return;
+  }
+
+  messageDialog.hidden = false;
+  messageDialogText.textContent = annotation.messageText || "";
+  const counts = messageDisplayCounts(annotation);
+  clampMessageDialogChoiceIndex();
+  const selectedAction = messageDialogActions()[messageDialogChoiceIndex];
+
+  messageDialog.querySelectorAll("[data-message-dialog-action]").forEach((button) => {
+    const action = button.dataset.messageDialogAction;
+    button.classList.toggle("is-selected", action === selectedAction);
+    button.classList.toggle("is-choice-selected", action === annotation.messageChoice);
+    button.setAttribute("aria-pressed", String(action === annotation.messageChoice));
+    if (action === "close") {
+      button.textContent = t("closeMessage");
+    } else if (action === "good") {
+      button.textContent = `${t("goodMessage")} ${counts.good}`;
+    } else if (action === "bad") {
+      button.textContent = `${t("badMessage")} ${counts.bad}`;
+    }
+  });
+}
+
+function closeMessageDialog() {
+  activeMessageAnnotationId = null;
+  messageDialogChoiceIndex = 0;
+  renderMessageDialog();
+}
+
+function recordMessageChoice(annotation, choice) {
+  if (!annotation || !["good", "bad"].includes(choice)) return;
+  annotation.messageChoice = choice;
+  annotation.comment = formatMessageAnnotationComment(annotation);
+  annotation.messageVotedAt = new Date().toISOString();
+  renderAnnotationLayer();
+  renderMessageDialog();
+  setStatus("messageChoiceSaved", {
+    choice: t(choice === "good" ? "messageChoiceGood" : "messageChoiceBad"),
+  });
+}
+
+function chooseMessageDialogAction(action) {
+  const annotation = activeMessageAnnotation();
+  if (!annotation) return;
+  if (action === "close") {
+    closeMessageDialog();
+    return;
+  }
+  recordMessageChoice(annotation, action);
+}
+
+function handleMessageDialogKey(code) {
+  const actions = messageDialogActions();
+  if (keyMap.left.includes(code)) {
+    messageDialogChoiceIndex = (messageDialogChoiceIndex - 1 + actions.length) % actions.length;
+    renderMessageDialog();
+    return true;
+  }
+  if (keyMap.right.includes(code)) {
+    messageDialogChoiceIndex = (messageDialogChoiceIndex + 1) % actions.length;
+    renderMessageDialog();
+    return true;
+  }
+  if (keyMap.jump.includes(code)) {
+    chooseMessageDialogAction(actions[messageDialogChoiceIndex]);
+    return true;
+  }
+  if (keyMap.interact.includes(code) || code === "Escape") {
+    closeMessageDialog();
+    return true;
+  }
+  return false;
+}
+
+function openMessageDialog(annotation) {
+  if (!annotation || !messageAnnotationsVisible) return false;
+  activeMessageAnnotationId = annotation.id;
+  messageDialogChoiceIndex = annotation.messageChoice === "good"
+    ? 1
+    : annotation.messageChoice === "bad"
+      ? 2
+      : 0;
+  player.vx = 0;
+  player.vy = 0;
+  player.jumpHeld = false;
+  player.dropThrough = false;
+  renderMessageDialog();
+  setStatus("messageOpened");
+  return true;
+}
+
+function openInteractableMessage() {
+  return openMessageDialog(interactableMessageAnnotation());
+}
+
+function updateMessageInteractionHint() {
+  const isReady = Boolean(supportedMessageAnnotation()) && !annotationMenuMode;
+  document.querySelectorAll('[data-map-action="interact"]').forEach((button) => {
+    button.closest(".control-row")?.classList.toggle("is-interaction-ready", isReady);
+    button.setAttribute("aria-current", isReady ? "true" : "false");
+  });
+}
+
 function handleAnnotationMenuKey(code) {
   if (keyMap.up.includes(code)) {
     selectAnnotationEntry(-1);
@@ -1536,6 +1782,7 @@ function isHighlightAnnotation(annotation) {
 
 function importPdfAnnotations() {
   world.annotations = [];
+  world.messageAnnotations = [];
   nextAnnotationOrder = 0;
 
   for (const page of world.pages) {
@@ -1548,26 +1795,46 @@ function importPdfAnnotations() {
       if (!rects.length) continue;
       const matchedPlatforms = platformsFromAnnotationRects(rects);
       const range = readingIndexRange(matchedPlatforms);
-
-      world.annotations.push({
+      const comment = annotationText(annotation.contentsObj) || annotationText(annotation.contents);
+      const message = parseMessageAnnotationComment(comment);
+      const importedAnnotation = {
         id: annotation.id || createAnnotationId(),
-        type: "highlight",
         source: "pdf",
         pdfId: annotation.id || "",
         pdfPage: page.number,
         pdfRect: Array.isArray(annotation.rect) ? [...annotation.rect] : [],
         pdfQuadPoints,
         text: textFromPlatforms(matchedPlatforms),
-        comment: annotationText(annotation.contentsObj) || annotationText(annotation.contents),
+        comment,
         rects,
+        marker: annotationMarkerFromSelection(matchedPlatforms, rects),
         startReadingIndex: range?.start,
         endReadingIndex: range?.end,
         sortOrder: nextAnnotationOrder,
         createdAt: annotation.modificationDate || "",
-      });
+      };
+
+      if (message) {
+        world.messageAnnotations.push({
+          ...importedAnnotation,
+          type: "message",
+          text: message.text,
+          messageText: message.text,
+          messageGoodBase: message.goodBase,
+          messageBadBase: message.badBase,
+          messageChoice: message.choice,
+          messageOriginalChoice: message.choice,
+        });
+      } else {
+        world.annotations.push({
+          ...importedAnnotation,
+          type: "highlight",
+        });
+      }
       nextAnnotationOrder += 1;
     }
   }
+  world.messageAnnotations.sort(compareAnnotationsByStart);
 }
 
 function pdfNumberArray(pdfDoc, values) {
@@ -1631,25 +1898,37 @@ function nearlyEqualNumberArray(a = [], b = [], tolerance = 0.75) {
   return a.every((value, index) => Math.abs(value - b[index]) <= tolerance);
 }
 
-function pdfAnnotationMatchesRemoval(pdfDoc, annotRef, removal) {
+function lookupPdfAnnotation(pdfDoc, annotRef) {
   let annot = annotRef;
   try {
     annot = pdfDoc.context.lookup(annotRef);
   } catch (error) {
-    console.warn("Could not inspect PDF annotation for removal.", error);
+    console.warn("Could not inspect PDF annotation.", error);
   }
+  return annot;
+}
+
+function isPdfHighlightDict(annot) {
   if (!annot?.lookup) return false;
 
   const subtype = annot?.lookup?.(PDFName.of("Subtype"));
-  if (!String(subtype).includes("Highlight")) return false;
+  return String(subtype).includes("Highlight");
+}
 
+function pdfAnnotationMatchesMetadata(annot, metadata) {
   const nm = pdfObjectText(annot.lookup?.(PDFName.of("NM")));
-  if (removal.id && nm && removal.id === nm) return true;
+  if (metadata.id && nm && metadata.id === nm) return true;
 
   const rect = pdfArrayValues(annot.lookup?.(PDFName.of("Rect"), PDFArray));
   const quadPoints = pdfArrayValues(annot.lookup?.(PDFName.of("QuadPoints"), PDFArray));
-  return nearlyEqualNumberArray(rect, removal.rect)
-    || nearlyEqualNumberArray(quadPoints, removal.quadPoints);
+  return nearlyEqualNumberArray(rect, metadata.rect)
+    || nearlyEqualNumberArray(quadPoints, metadata.quadPoints);
+}
+
+function pdfAnnotationMatchesRemoval(pdfDoc, annotRef, removal) {
+  const annot = lookupPdfAnnotation(pdfDoc, annotRef);
+  if (!isPdfHighlightDict(annot)) return false;
+  return pdfAnnotationMatchesMetadata(annot, removal);
 }
 
 function removePdfAnnotations(pdfDoc) {
@@ -1673,6 +1952,42 @@ function removePdfAnnotations(pdfDoc) {
       if (removals.some((removal) => pdfAnnotationMatchesRemoval(pdfDoc, annotRef, removal))) {
         annots.remove(index);
       }
+    }
+  });
+}
+
+function updatePdfMessageAnnotations(pdfDoc) {
+  const changedMessages = world.messageAnnotations.filter(messageVoteChanged);
+  if (!changedMessages.length) return;
+
+  const messagesByPage = new Map();
+  for (const annotation of changedMessages) {
+    const page = annotation.pdfPage || annotationFirstPage(annotation);
+    if (!messagesByPage.has(page)) messagesByPage.set(page, []);
+    messagesByPage.get(page).push(annotation);
+  }
+
+  pdfDoc.getPages().forEach((page, pageIndex) => {
+    const messages = messagesByPage.get(pageIndex + 1);
+    if (!messages?.length) return;
+
+    const annots = page.node.lookupMaybe?.(PDFName.of("Annots"), PDFArray);
+    if (!annots) return;
+
+    for (let index = 0; index < annots.size(); index += 1) {
+      const annotRef = annots.get(index);
+      const annot = lookupPdfAnnotation(pdfDoc, annotRef);
+      if (!isPdfHighlightDict(annot)) continue;
+
+      const message = messages.find((annotation) => pdfAnnotationMatchesMetadata(annot, {
+        id: annotation.pdfId || annotation.id || "",
+        rect: annotation.pdfRect || [],
+        quadPoints: annotation.pdfQuadPoints || [],
+      }));
+      if (!message) continue;
+
+      annot.set(PDFName.of("Contents"), PDFHexString.fromText(formatMessageAnnotationComment(message)));
+      annot.set(PDFName.of("M"), PDFString.of(pdfDateString()));
     }
   });
 }
@@ -1762,7 +2077,10 @@ async function annotatedPdfBytes() {
   if (!currentPdfBytes) return null;
   const sessionAnnotations = world.annotations.filter((annotation) => annotation.source === "session");
   const hasPdfAnnotationRemovals = world.removedPdfAnnotations.length > 0;
-  if (!sessionAnnotations.length && !hasPdfAnnotationRemovals) return new Uint8Array(currentPdfBytes.slice(0));
+  const hasMessageAnnotationUpdates = world.messageAnnotations.some(messageVoteChanged);
+  if (!sessionAnnotations.length && !hasPdfAnnotationRemovals && !hasMessageAnnotationUpdates) {
+    return new Uint8Array(currentPdfBytes.slice(0));
+  }
 
   if (!PDFDocument || !PDFName || !PDFNumber || !PDFArray || !PDFString || !PDFHexString) {
     throw new Error("pdf-lib-missing");
@@ -1771,6 +2089,7 @@ async function annotatedPdfBytes() {
   const pdfDoc = await PDFDocument.load(currentPdfBytes.slice(0));
   const pdfPages = pdfDoc.getPages();
   removePdfAnnotations(pdfDoc);
+  updatePdfMessageAnnotations(pdfDoc);
 
   for (const annotation of sessionAnnotations) {
     const rectsByPage = new Map();
@@ -1998,12 +2317,15 @@ async function loadPdf(file) {
   currentPdfBytes = null;
   currentPdfName = file?.name || "document.pdf";
   world.annotations = [];
+  world.messageAnnotations = [];
   world.removedPdfAnnotations = [];
   nextAnnotationOrder = 0;
   annotationMenuMode = false;
   selectedAnnotationIndex = 0;
   annotationRadialActive = false;
   annotationRadialChoice = null;
+  activeMessageAnnotationId = null;
+  renderMessageDialog();
   renderAnnotationRadial();
   updateAnnotationControls();
   clearTextSelection({ render: false });
@@ -2021,6 +2343,7 @@ async function loadPdf(file) {
   world.platforms = [];
   world.portals = [];
   world.annotations = [];
+  world.messageAnnotations = [];
   world.removedPdfAnnotations = [];
   nextAnnotationOrder = 0;
   world.activePlatformLineId = null;
@@ -2444,6 +2767,7 @@ function renderPlayer() {
   playerSprite.classList.toggle("is-facing-right", player.facingDirection >= 0);
   renderBladeSwing();
   pdfDocument.classList.toggle("show-collisions", collisionsVisible);
+  updateMessageInteractionHint();
   if (world.renderedActivePlatformLineId === world.activePlatformLineId) return;
   for (const shape of pdfDocument.querySelectorAll(".collision-shape")) {
     shape.classList.toggle("is-line-highlighted", shape.dataset.lineId === world.activePlatformLineId);
@@ -2468,6 +2792,7 @@ function teleportPlayerToClick(event) {
     teleportSuppressedPointerEvents.has(event)
     || !world.loaded
     || annotationMenuMode
+    || activeMessageAnnotationId
     || event.button !== 0
     || !eventPathIncludesElement(event, readerStage)
   ) {
@@ -2571,9 +2896,24 @@ function updateControllerInput() {
     const attackWasPressed = controllerMap.attack.some((button) => previousControllerButtons.has(button));
     const dashPressed = controllerMap.dash.some((button) => controllerButtons.has(button));
     const dashWasPressed = controllerMap.dash.some((button) => previousControllerButtons.has(button));
+    const interactPressed = controllerMap.interact.some((button) => controllerButtons.has(button));
+    const interactWasPressed = controllerMap.interact.some((button) => previousControllerButtons.has(button));
     const menuPressed = controllerMap.menu.some((button) => controllerButtons.has(button));
     const menuWasPressed = controllerMap.menu.some((button) => previousControllerButtons.has(button));
     const leftBumperPressed = controllerButtons.has(4);
+
+    if (activeMessageAnnotationId) {
+      if (controllerDirections.left && !previousControllerDirections.left) handleMessageDialogKey(keyMap.left[0]);
+      if (controllerDirections.right && !previousControllerDirections.right) handleMessageDialogKey(keyMap.right[0]);
+      if (jumpPressed && !jumpWasPressed) handleMessageDialogKey(keyMap.jump[0]);
+      if (interactPressed && !interactWasPressed) handleMessageDialogKey(keyMap.interact[0]);
+      if (!jumpPressed && jumpWasPressed) {
+        player.jumpHeld = false;
+        player.dropThrough = false;
+      }
+      storePreviousControllerState(pressedButtons);
+      return;
+    }
 
     if (menuPressed && !menuWasPressed) {
       toggleAnnotationMenuMode();
@@ -2620,6 +2960,9 @@ function updateControllerInput() {
       restartAutoScroll();
       startAttack();
     }
+    if (interactPressed && !interactWasPressed) {
+      openInteractableMessage();
+    }
     if (!jumpPressed && jumpWasPressed) {
       player.jumpHeld = false;
       player.dropThrough = false;
@@ -2632,7 +2975,7 @@ function updateControllerInput() {
 
 function tick() {
   updateControllerInput();
-  if (world.loaded && !annotationMenuMode) updatePlayer();
+  if (world.loaded && !annotationMenuMode && !activeMessageAnnotationId) updatePlayer();
   renderPlayer();
   requestAnimationFrame(tick);
 }
@@ -2647,12 +2990,15 @@ async function handlePdfFile(file) {
     world.loaded = false;
     currentPdfBytes = null;
     world.annotations = [];
+    world.messageAnnotations = [];
     world.removedPdfAnnotations = [];
     nextAnnotationOrder = 0;
     annotationMenuMode = false;
     selectedAnnotationIndex = 0;
     annotationRadialActive = false;
     annotationRadialChoice = null;
+    activeMessageAnnotationId = null;
+    renderMessageDialog();
     renderAnnotationRadial();
     updateAnnotationControls();
     renderAnnotationSidebar();
@@ -2723,6 +3069,7 @@ dropZone.addEventListener("drop", async (event) => {
 });
 
 resetButton.addEventListener("click", () => {
+  closeMessageDialog();
   clearTextSelection();
   resetPlayer();
   autoCenterPlayer();
@@ -2748,6 +3095,27 @@ collisionButton.addEventListener("click", () => {
   updateCollisionButtonLabel();
   collisionButton.setAttribute("aria-pressed", String(collisionsVisible));
   renderPlayer();
+});
+
+messageAnnotationsButton.addEventListener("click", () => {
+  messageAnnotationsVisible = !messageAnnotationsVisible;
+  updateMessageAnnotationsButtonLabel();
+  messageAnnotationsButton.setAttribute("aria-pressed", String(messageAnnotationsVisible));
+  if (!messageAnnotationsVisible) closeMessageDialog();
+  renderAnnotationLayer();
+  renderPlayer();
+});
+
+messageDialog?.addEventListener("click", (event) => {
+  if (event.target === messageDialog) {
+    closeMessageDialog();
+    return;
+  }
+  const button = event.target.closest("[data-message-dialog-action]");
+  if (!button) return;
+  const actions = messageDialogActions();
+  messageDialogChoiceIndex = actions.indexOf(button.dataset.messageDialogAction);
+  chooseMessageDialogAction(button.dataset.messageDialogAction);
 });
 
 languageSelect.addEventListener("change", () => {
@@ -2786,6 +3154,12 @@ window.addEventListener("keydown", (event) => {
     event.preventDefault();
   }
 
+  if (activeMessageAnnotationId) {
+    if (!wasPressed) handleMessageDialogKey(event.code);
+    keys.add(event.code);
+    return;
+  }
+
   if (!wasPressed && event.code === "Delete") {
     event.preventDefault();
     deleteSelectedAnnotation();
@@ -2803,6 +3177,7 @@ window.addEventListener("keydown", (event) => {
   if (!wasPressed && keyMap.jump.includes(event.code)) startJump();
   if (!wasPressed && keyMap.dash.includes(event.code)) startDash();
   if (!wasPressed && keyMap.attack.includes(event.code)) startAttack();
+  if (!wasPressed && keyMap.interact.includes(event.code)) openInteractableMessage();
   if (!wasPressed && keyMap.copySelection.includes(event.code)) performSelectionAction("copySelection");
   if (!wasPressed && keyMap.highlightSelection.includes(event.code)) performSelectionAction("highlightSelection");
   if (!wasPressed && keyMap.commentSelection.includes(event.code)) performSelectionAction("commentSelection");
