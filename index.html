@@ -32,6 +32,14 @@
               <input id="pdfInput" type="file" accept="application/pdf,.pdf">
               <span data-i18n="uploadPdf">Upload PDF</span>
             </label>
+            <div class="pdf-zoom-control" aria-label="PDF zoom" data-i18n-attr="aria-label:zoomLabel">
+              <span data-i18n="zoomLabel">Zoom</span>
+              <button id="pdfZoomOutButton" type="button" aria-label="Zoom out" data-i18n-attr="aria-label:zoomOut">-</button>
+              <button id="pdfZoomResetButton" type="button" aria-label="Reset zoom" data-i18n-attr="aria-label:resetZoom">
+                <span id="pdfZoomValue">100%</span>
+              </button>
+              <button id="pdfZoomInButton" type="button" aria-label="Zoom in" data-i18n-attr="aria-label:zoomIn">+</button>
+            </div>
             <button id="downloadAnnotatedButton" type="button" data-i18n="downloadAnnotated" disabled>Download Annotated PDF</button>
             <button id="collisionButton" type="button" aria-pressed="false" data-i18n="showCollisions">Show Collisions</button>
             <button id="messageAnnotationsButton" type="button" aria-pressed="true" data-i18n="hideMessages">Hide Messages</button>
@@ -143,7 +151,9 @@
 
         <section class="reader-stage" aria-label="PDF platformer" data-i18n-attr="aria-label:readerStageLabel">
           <div id="quizPrompt" class="quiz-prompt" aria-live="polite" hidden></div>
-          <div id="pdfDocument" class="pdf-document"></div>
+          <div id="pdfViewport" class="pdf-viewport">
+            <div id="pdfDocument" class="pdf-document"></div>
+          </div>
           <div id="playerSprite" class="player-sprite" aria-hidden="true">
             <span></span>
           </div>

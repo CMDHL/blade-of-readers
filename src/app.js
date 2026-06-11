@@ -3,6 +3,7 @@ import * as pdfjsLib from "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38
 const PDFJS_SRC = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs";
 
 const pdfDocument = document.querySelector("#pdfDocument");
+const pdfViewport = document.querySelector("#pdfViewport");
 const topbar = document.querySelector(".topbar");
 const topbarToggleButton = document.querySelector("#topbarToggleButton");
 const touchControllerToggleButton = document.querySelector("#touchControllerToggleButton");
@@ -20,6 +21,10 @@ const collisionButton = document.querySelector("#collisionButton");
 const messageAnnotationsButton = document.querySelector("#messageAnnotationsButton");
 const quizPauseButton = document.querySelector("#quizPauseButton");
 const quizToggleButton = document.querySelector("#quizToggleButton");
+const pdfZoomOutButton = document.querySelector("#pdfZoomOutButton");
+const pdfZoomResetButton = document.querySelector("#pdfZoomResetButton");
+const pdfZoomInButton = document.querySelector("#pdfZoomInButton");
+const pdfZoomValue = document.querySelector("#pdfZoomValue");
 const languageSelect = document.querySelector("#languageSelect");
 const dropZone = document.querySelector("#dropZone");
 const loadingOverlay = document.querySelector("#loadingOverlay");
@@ -48,6 +53,9 @@ const SPAWN_ANNOTATION_COMMENT = "[spawn]";
 const QUIZ_ANNOTATION_PREFIX = "[quiz]";
 const QUIZ_DEFEAT_FADE_MS = 1400;
 const QUIZ_SPAWN_FADE_MS = 2000;
+const PDF_VIEW_SCALE_MIN = 1;
+const PDF_VIEW_SCALE_MAX = 2;
+const PDF_VIEW_SCALE_STEP = 0.125;
 const TUTORIAL_PDFS = {
   en: {
     name: "Tutorial_en.pdf",
@@ -215,6 +223,7 @@ let userPdfLoaded = false;
 let topbarHidden = false;
 let mobileTopbarDefaultApplied = false;
 let touchControllerEnabled = true;
+let pdfViewScale = 1;
 let annotationMenuMode = false;
 let selectedAnnotationIndex = 0;
 let nextAnnotationOrder = 0;
@@ -236,6 +245,10 @@ const translations = {
     appName: "Blade of Readers",
     tagline: "Convert complicated articles into simple platformer levels.",
     languageLabel: "Language",
+    zoomLabel: "Zoom",
+    zoomOut: "Zoom out",
+    zoomIn: "Zoom in",
+    resetZoom: "Reset zoom",
     uploadPdf: "Upload PDF",
     copySelection: "Copy",
     highlightSelection: "Highlight",
@@ -324,6 +337,10 @@ const translations = {
     appName: "读者之刃",
     tagline: "把晦涩的文章变成简单的平台跳跃游戏。",
     languageLabel: "语言",
+    zoomLabel: "缩放",
+    zoomOut: "缩小",
+    zoomIn: "放大",
+    resetZoom: "重置缩放",
     uploadPdf: "上传 PDF",
     copySelection: "复制",
     highlightSelection: "高亮",
@@ -477,6 +494,45 @@ function updateTouchControllerToggleButton() {
   touchControllerToggleButton.setAttribute("aria-pressed", String(touchControllerEnabled));
 }
 
+function clampPdfViewScale(scale) {
+  const value = Number.isFinite(scale) ? scale : 1;
+  return Math.max(PDF_VIEW_SCALE_MIN, Math.min(PDF_VIEW_SCALE_MAX, value));
+}
+
+function updatePdfZoomControls() {
+  if (pdfZoomValue) pdfZoomValue.textContent = `${Math.round(pdfViewScale * 100)}%`;
+  pdfZoomOutButton?.toggleAttribute("disabled", pdfViewScale <= PDF_VIEW_SCALE_MIN);
+  pdfZoomInButton?.toggleAttribute("disabled", pdfViewScale >= PDF_VIEW_SCALE_MAX);
+  pdfZoomResetButton?.setAttribute("aria-label", t("resetZoom"));
+}
+
+function setPdfViewportSize() {
+  if (!pdfViewport) return;
+  if (!world.pages.length) {
+    pdfViewport.style.width = "";
+    pdfViewport.style.height = "";
+    return;
+  }
+  pdfViewport.style.width = `${Math.ceil(world.cssWidth * pdfViewScale)}px`;
+  pdfViewport.style.height = `${Math.ceil(world.cssHeight * pdfViewScale)}px`;
+}
+
+function applyPdfViewScale({ centerPlayer = false } = {}) {
+  pdfViewScale = clampPdfViewScale(pdfViewScale);
+  pdfDocument.style.transform = `scale(${pdfViewScale})`;
+  document.body.classList.toggle("is-pdf-zoomed", pdfViewScale > 1);
+  setPdfViewportSize();
+  updatePdfZoomControls();
+  if (centerPlayer) restartAutoScroll();
+}
+
+function setPdfViewScale(scale) {
+  const nextScale = clampPdfViewScale(scale);
+  if (nextScale === pdfViewScale) return;
+  pdfViewScale = nextScale;
+  applyPdfViewScale({ centerPlayer: true });
+}
+
 function setTopbarHidden(isHidden) {
   topbarHidden = isHidden;
   topbar.classList.toggle("is-hidden", topbarHidden);
@@ -514,6 +570,7 @@ function applyLanguage(language) {
   updateQuizPauseButtonLabel();
   updateQuizToggleButtonLabel();
   updateTopbarToggleButton();
+  updatePdfZoomControls();
   updateControlLabels();
   updateTouchControllerToggleButton();
   updateAnnotationControls();
@@ -620,6 +677,7 @@ function readerStageAvailableWidth() {
 function setDocumentSize() {
   pdfDocument.style.width = `${world.cssWidth}px`;
   pdfDocument.style.height = `${world.cssHeight}px`;
+  setPdfViewportSize();
 }
 
 function applyPhysicsScale() {
@@ -667,11 +725,12 @@ function viewportPageRect() {
 function visibleWorldRect() {
   const offset = documentPageOffset();
   const viewport = viewportPageRect();
+  const scale = Math.max(0.01, pdfViewScale);
   return {
-    left: Math.max(0, viewport.left - offset.left),
-    top: Math.max(0, viewport.top - offset.top),
-    right: Math.min(world.cssWidth, viewport.left + viewport.width - offset.left),
-    bottom: Math.min(world.cssHeight, viewport.top + viewport.height - offset.top),
+    left: Math.max(0, (viewport.left - offset.left) / scale),
+    top: Math.max(0, (viewport.top - offset.top) / scale),
+    right: Math.min(world.cssWidth, (viewport.left + viewport.width - offset.left) / scale),
+    bottom: Math.min(world.cssHeight, (viewport.top + viewport.height - offset.top) / scale),
   };
 }
 
@@ -712,10 +771,11 @@ function autoCenterPlayer() {
   if (!world.loaded || !autoScrollEnabled) return;
   const offset = documentPageOffset();
   const viewport = viewportPageRect();
-  const targetX = offset.left + player.x + player.width / 2 - viewport.width / 2;
+  const scale = Math.max(0.01, pdfViewScale);
+  const targetX = offset.left + (player.x + player.width / 2) * scale - viewport.width / 2;
   const targetY = player.groundedByViewport
     ? viewport.top
-    : offset.top + player.y + player.height / 2 - viewport.height / 2;
+    : offset.top + (player.y + player.height / 2) * scale - viewport.height / 2;
   programmaticScrollUntil = performance.now() + 150;
   window.scrollTo({
     left: Math.max(0, targetX),
@@ -1690,6 +1750,9 @@ function setAnnotationMenuMode(isActive) {
   if (annotationMenuMode) focusSelectedAnnotation();
   updateResponsiveUiState();
   setStatus(annotationMenuMode ? "menuModeOn" : "menuModeOff");
+  if (world.loaded && (!annotationMenuMode || getComputedStyle(readerStage).display !== "none")) {
+    restartAutoScroll();
+  }
 }
 
 function toggleAnnotationMenuMode() {
@@ -2711,6 +2774,7 @@ function clearPdfDocument() {
   pdfDocument.append(playerSprite);
   pdfDocument.style.width = "";
   pdfDocument.style.height = "";
+  setPdfViewportSize();
 }
 
 function setLoadingPdf(isLoading) {
@@ -3698,9 +3762,10 @@ function teleportPlayerToClick(event) {
 
   const offset = documentPageOffset();
   const viewport = viewportPageRect();
+  const scale = Math.max(0.01, pdfViewScale);
   const clickPoint = {
-    x: event.clientX + viewport.left - offset.left,
-    y: event.clientY + viewport.top - offset.top,
+    x: (event.clientX + viewport.left - offset.left) / scale,
+    y: (event.clientY + viewport.top - offset.top) / scale,
   };
   const clickedPlatform = world.platforms.find((platform) => pointInRect(clickPoint, platform));
   if (!clickedPlatform) return;
@@ -4195,6 +4260,18 @@ topbarToggleButton.addEventListener("click", () => {
   setTopbarHidden(!topbarHidden);
 });
 
+pdfZoomOutButton?.addEventListener("click", () => {
+  setPdfViewScale(pdfViewScale - PDF_VIEW_SCALE_STEP);
+});
+
+pdfZoomResetButton?.addEventListener("click", () => {
+  setPdfViewScale(1);
+});
+
+pdfZoomInButton?.addEventListener("click", () => {
+  setPdfViewScale(pdfViewScale + PDF_VIEW_SCALE_STEP);
+});
+
 touchControllerToggleButton?.addEventListener("click", (event) => {
   event.preventDefault();
   event.stopPropagation();
@@ -4388,6 +4465,7 @@ if (window.visualViewport) {
 }
 
 applyLanguage(detectLanguage());
+applyPdfViewScale();
 updateResponsiveUiState();
 loadTutorialPdfForLanguage(currentLanguage);
 if (window.ResizeObserver && topbar) {
