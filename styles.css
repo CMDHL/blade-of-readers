@@ -476,7 +476,7 @@ button:disabled {
 .pdf-message-platform-highlight {
   position: absolute;
   border-radius: 2px;
-  background: rgba(93, 95, 239, 0.28);
+  background: rgba(68, 68, 68, 0.28);
   outline: 1px solid rgba(64, 66, 178, 0.46);
 }
 
