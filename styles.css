@@ -429,22 +429,45 @@ button:disabled {
   position: sticky;
   top: calc(var(--sticky-topbar-height) + 8px);
   z-index: 9;
-  width: 100%;
-  margin: 0 0 10px;
-  padding: 10px 12px;
-  border: 1px solid rgba(25, 118, 111, 0.32);
+  width: fit-content;
+  max-width: min(100%, 900px);
+  margin: 0 auto 12px;
+  padding: 12px 18px;
+  border: 1px solid rgba(25, 118, 111, 0.42);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.94);
   color: var(--ink);
-  font-size: 0.95rem;
-  font-weight: 750;
+  font-size: 1.05rem;
+  font-weight: 800;
   line-height: 1.38;
+  text-align: center;
   overflow-wrap: anywhere;
-  box-shadow: 0 4px 14px rgba(26, 31, 44, 0.07);
+  transform-origin: center;
+  animation: quiz-prompt-breathe 2400ms ease-in-out infinite;
+  box-shadow:
+    0 0 0 3px rgba(25, 118, 111, 0.08),
+    0 8px 22px rgba(26, 31, 44, 0.12);
 }
 
 .quiz-prompt[hidden] {
   display: none;
+}
+
+@keyframes quiz-prompt-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.035);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .quiz-prompt {
+    animation: none;
+  }
 }
 
 .pdf-document {
@@ -883,18 +906,26 @@ button:disabled {
 }
 
 .loading-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 4;
+  position: fixed;
+  top: calc(var(--sticky-topbar-height) + 16px);
+  left: 50%;
+  z-index: 18;
   display: grid;
-  place-content: center;
+  justify-items: center;
   gap: 10px;
-  padding: 24px;
+  width: fit-content;
+  max-width: min(620px, calc(100vw - (var(--shell-inline-padding) * 2)));
+  min-width: min(320px, calc(100vw - (var(--shell-inline-padding) * 2)));
+  padding: 16px 22px;
   text-align: center;
   color: #20242c;
   background:
     linear-gradient(rgba(248, 248, 245, 0.92), rgba(248, 248, 245, 0.96)),
     repeating-linear-gradient(0deg, transparent 0 32px, rgba(25, 118, 111, 0.12) 32px 33px);
+  border: 1px solid rgba(25, 118, 111, 0.26);
+  border-radius: 6px;
+  box-shadow: 0 10px 34px rgba(26, 31, 44, 0.16);
+  transform: translateX(-50%);
 }
 
 .loading-overlay.is-hidden {

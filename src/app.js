@@ -2638,6 +2638,8 @@ function clearPdfDocument() {
   removeActiveQuizEnemy();
   pdfDocument.replaceChildren();
   pdfDocument.append(playerSprite);
+  pdfDocument.style.width = "";
+  pdfDocument.style.height = "";
 }
 
 function setLoadingPdf(isLoading) {
