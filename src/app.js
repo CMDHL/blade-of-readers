@@ -1341,7 +1341,7 @@ function firstContentLine(text) {
 }
 
 function annotationPreviewText(annotation) {
-  return compactText(firstContentLine(annotation.text))
+  return compactText(annotation.text)
     || t(annotation.source === "pdf" ? "pdfAnnotationEntry" : "highlightEntry");
 }
 
