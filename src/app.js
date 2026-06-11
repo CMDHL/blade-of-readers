@@ -750,68 +750,77 @@ function pagePlatformLines(pageNumber, platforms) {
     .map(([lineOrder, linePlatforms]) => lineFromPlatforms(pageNumber, linePlatforms, lineOrder));
 }
 
-function buildWrapPortals() {
-  const portals = [];
+function platformLinesInReadingOrder() {
+  const lines = [];
   const byPage = new Map();
   for (const platform of world.platforms) {
     if (!byPage.has(platform.page)) byPage.set(platform.page, []);
     byPage.get(platform.page).push(platform);
   }
 
-  for (const [pageNumber, platforms] of byPage) {
-    const lines = pagePlatformLines(pageNumber, platforms);
-    lines.forEach((line, index) => {
+  for (const [pageNumber, platforms] of [...byPage.entries()].sort(([a], [b]) => a - b)) {
+    pagePlatformLines(pageNumber, platforms).forEach((line, index) => {
       const lineId = `${pageNumber}:${index}`;
+      line.lineId = lineId;
+      line.lineOrder = index;
       line.platforms = platformsInTextOrder(line.platforms);
       for (const [wordIndex, platform] of line.platforms.entries()) {
         platform.lineId = lineId;
         platform.lineOrder = index;
         platform.lineWordOrder = wordIndex;
       }
+      lines.push(line);
     });
+  }
 
-    for (let index = 0; index < lines.length - 1; index += 1) {
-      const fromLine = platformsInTextOrder(lines[index].platforms);
-      const toLine = platformsInTextOrder(lines[index + 1].platforms);
-      const from = fromLine.at(-1);
-      const to = toLine[0];
-      if (!from || !to) continue;
+  return lines;
+}
 
-      const portalHeight = from.textHeight;
-      const portalWidth = Math.max(4, from.textHeight * 0.55);
-      const portalAttachOverlap = Math.max(1, from.textHeight * 0.05);
-      const portalStandOverlap = Math.max(2, portalHeight * 0.2);
-      const fromEdge = from.x + from.width;
-      const toEdge = to.x;
-      portals.push({
-        x: fromEdge - portalAttachOverlap,
-        y: from.y - portalHeight + portalStandOverlap,
-        width: portalWidth + portalAttachOverlap,
-        height: portalHeight,
-        page: pageNumber,
-        direction: 1,
-        sourcePlatform: from,
-        targetPlatform: to,
-        targetX: to.x,
-        targetY: to.y,
-        triggerX: fromEdge,
-        type: "portal",
-      });
-      portals.push({
-        x: toEdge - portalWidth,
-        y: to.y - portalHeight + portalStandOverlap,
-        width: portalWidth + portalAttachOverlap,
-        height: portalHeight,
-        page: pageNumber,
-        direction: -1,
-        sourcePlatform: to,
-        targetPlatform: from,
-        targetX: from.x + from.width - player.width,
-        targetY: from.y,
-        triggerX: toEdge,
-        type: "portal",
-      });
-    }
+function portalLandingX(targetPlatform, direction) {
+  const edgeX = direction > 0
+    ? targetPlatform.x
+    : targetPlatform.x + targetPlatform.width - player.width;
+  return Math.max(0, Math.min(world.cssWidth - player.width, edgeX));
+}
+
+function addWrapPortal(portals, sourcePlatform, targetPlatform, direction) {
+  const portalHeight = sourcePlatform.textHeight;
+  const portalWidth = Math.max(4, sourcePlatform.textHeight * 0.55);
+  const portalAttachOverlap = Math.max(1, sourcePlatform.textHeight * 0.05);
+  const portalStandOverlap = Math.max(2, portalHeight * 0.2);
+  const sourceEdge = direction > 0
+    ? sourcePlatform.x + sourcePlatform.width
+    : sourcePlatform.x;
+  const portalX = direction > 0
+    ? sourceEdge - portalAttachOverlap
+    : sourceEdge - portalWidth;
+
+  portals.push({
+    x: portalX,
+    y: sourcePlatform.y - portalHeight + portalStandOverlap,
+    width: portalWidth + portalAttachOverlap,
+    height: portalHeight,
+    page: sourcePlatform.page,
+    direction,
+    sourcePlatform,
+    targetPlatform,
+    targetX: portalLandingX(targetPlatform, direction),
+    targetY: targetPlatform.y,
+    triggerX: sourceEdge,
+    type: "portal",
+  });
+}
+
+function buildWrapPortals() {
+  const portals = [];
+  const lines = platformLinesInReadingOrder();
+
+  for (let index = 0; index < lines.length - 1; index += 1) {
+    const from = lines[index].platforms.at(-1);
+    const to = lines[index + 1].platforms[0];
+    if (!from || !to) continue;
+    addWrapPortal(portals, from, to, 1);
+    addWrapPortal(portals, to, from, -1);
   }
 
   world.portals = portals;
@@ -2085,7 +2094,7 @@ function updatePlayer() {
   player.coyote = player.grounded ? 8 : Math.max(0, player.coyote - 1);
   if (wasGrounded && !player.grounded) player.coyote = 8;
 
-  if (autoScrollEnabled) keepPlayerInVisibleWindow();
+  if (autoScrollEnabled && !usedPortal) keepPlayerInVisibleWindow();
   updateActivePage();
   autoCenterPlayer();
 }
