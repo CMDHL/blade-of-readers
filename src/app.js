@@ -1952,6 +1952,7 @@ function closeMessageDialog() {
   activeMessageAnnotationId = null;
   messageDialogChoiceIndex = 0;
   renderMessageDialog();
+  updateResponsiveUiState();
 }
 
 function recordMessageChoice(annotation, choice) {
@@ -2013,6 +2014,7 @@ function openMessageDialog(annotation) {
   player.jumpHeld = false;
   player.dropThrough = false;
   renderMessageDialog();
+  updateResponsiveUiState();
   setStatus("messageOpened");
   return true;
 }
@@ -4001,11 +4003,15 @@ function clearVirtualControllerInput() {
 function updateResponsiveUiState(gamepad = activeGamepad()) {
   const mobile = isMobileDevice();
   const hasExternalController = Boolean(gamepad);
+  const pauseTouchControllerForMessage = Boolean(activeMessageAnnotationId);
   if (mobile && !mobileTopbarDefaultApplied) {
     mobileTopbarDefaultApplied = true;
     setTopbarHidden(true);
   }
-  const touchControllerActiveNow = mobile && !hasExternalController && touchControllerEnabled;
+  const touchControllerActiveNow = mobile
+    && !hasExternalController
+    && touchControllerEnabled
+    && !pauseTouchControllerForMessage;
   document.body.classList.toggle("is-mobile-device", mobile);
   document.body.classList.toggle("has-external-controller", hasExternalController);
   document.body.classList.toggle("is-annotation-menu-mode", annotationMenuMode);
