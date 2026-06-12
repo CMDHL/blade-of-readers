@@ -22,8 +22,8 @@ Upload a PDF and walk on its text. Attack text to select it, then copy, highligh
 [quiz]What are the paper's main contributions?
 ```
 
-`good` 和 `bad` 是谏言的初始赞同/反对票数。\
-`good` and `bad` are the message's starting good/bad vote counts.
+good 和 bad 是编造的好评数与差评数，主打一个氛围感。\
+good and bad are made-up vote counts for whether other imaginary players like it or not.
 
 测验的高亮文本就是答案。\
 For quizzes, the highlighted text is the answer.
