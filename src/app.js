@@ -668,11 +668,24 @@ function shellInlinePadding() {
 function isMobileDevice() {
   const { width, height } = viewportSize();
   const compactSide = Math.min(width, height) <= 820;
-  const touchCapable = Boolean(navigator.userAgentData?.mobile)
-    || mobilePointerQuery?.matches
-    || navigator.maxTouchPoints > 0
+  if (!compactSide) return false;
+
+  // Prefer computer view whenever the browser reports a fine pointer.
+  // This covers mouse/trackpad devices, including many laptops/desktops that
+  // also support touch. It is the closest reliable browser signal for
+  // “keyboard-style computer use”; the web cannot directly detect a keyboard
+  // before the user presses a key.
+  const hasFinePointer = Boolean(
+    window.matchMedia && window.matchMedia("(any-pointer: fine)").matches,
+  );
+  if (hasFinePointer) return false;
+
+  const uaLooksMobile = Boolean(navigator.userAgentData?.mobile)
     || /Android|iPhone|iPad|iPod|Mobile/iu.test(navigator.userAgent || "");
-  return Boolean(touchCapable && compactSide);
+  const touchOnlyPointer = Boolean(mobilePointerQuery?.matches)
+    && !hasFinePointer;
+
+  return Boolean(uaLooksMobile || touchOnlyPointer);
 }
 
 function mobileLandscapeAvailableWidth() {
