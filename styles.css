@@ -558,6 +558,16 @@ button:disabled {
   box-shadow: var(--shadow);
 }
 
+.pdf-page.is-pending-render:not(.is-rendered) {
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(25, 118, 111, 0.06), rgba(255, 255, 255, 0)),
+    #fff;
+}
+
+.pdf-page.is-rendering:not(.is-rendered) {
+  opacity: 0.72;
+}
+
 .pdf-page + .pdf-page {
   margin-top: 28px;
 }

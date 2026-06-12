@@ -67,6 +67,10 @@ const TUTORIAL_PDFS = {
   },
 };
 
+const PDF_PAGE_RENDER_ROOT_MARGIN = "900px 0px";
+const PDF_PAGE_RENDER_CONCURRENCY = 1;
+
+
 const keyMap = {
   left: ["ArrowLeft"],
   right: ["ArrowRight"],
@@ -123,7 +127,11 @@ const world = {
   cssHeight: 720,
   pages: [],
   platforms: [],
+  platformsByPage: new Map(),
+  platformsByLineId: new Map(),
+  platformsByReadingIndex: [],
   portals: [],
+  portalsByPage: new Map(),
   annotations: [],
   messageAnnotations: [],
   quizAnnotations: [],
@@ -216,6 +224,9 @@ let currentStatus = { key: "waiting", values: {} };
 let currentPageText = { page: 1, total: null };
 let currentPdfBytes = null;
 let currentPdfName = "document.pdf";
+let pdfPageObserver = null;
+let pdfPageRenderQueue = [];
+let pdfPageRenderActiveCount = 0;
 let pdfLoadVersion = 0;
 let userPdfLoadVersion = 0;
 let userPdfLoadPending = false;
@@ -972,6 +983,48 @@ function platformsInTextOrder(platforms) {
   ));
 }
 
+function addToIndexMap(map, key, value) {
+  if (!map.has(key)) map.set(key, []);
+  map.get(key).push(value);
+}
+
+function rebuildPlatformIndexes() {
+  world.platformsByPage = new Map();
+  world.platformsByLineId = new Map();
+  world.platformsByReadingIndex = [];
+
+  for (const platform of world.platforms) {
+    addToIndexMap(world.platformsByPage, platform.page, platform);
+    if (platform.lineId) addToIndexMap(world.platformsByLineId, platform.lineId, platform);
+    if (Number.isFinite(platform.readingIndex)) {
+      world.platformsByReadingIndex[platform.readingIndex] = platform;
+    }
+  }
+}
+
+function platformsOnPages(firstPage, lastPage) {
+  const platforms = [];
+  for (let pageNumber = firstPage; pageNumber <= lastPage; pageNumber += 1) {
+    platforms.push(...(world.platformsByPage.get(pageNumber) || []));
+  }
+  return platforms;
+}
+
+function rebuildPortalIndexes() {
+  world.portalsByPage = new Map();
+  for (const portal of world.portals) {
+    addToIndexMap(world.portalsByPage, portal.page, portal);
+  }
+}
+
+function portalsOnPages(firstPage, lastPage) {
+  const portals = [];
+  for (let pageNumber = firstPage; pageNumber <= lastPage; pageNumber += 1) {
+    portals.push(...(world.portalsByPage.get(pageNumber) || []));
+  }
+  return portals;
+}
+
 function platformTextHeight(platforms) {
   const heights = platforms.map((platform) => platform.textHeight).filter(Number.isFinite);
   return heights.length ? Math.max(...heights) : world.minTextHeight || 16;
@@ -1082,6 +1135,7 @@ function buildWrapPortals() {
   }
 
   world.portals = portals;
+  rebuildPortalIndexes();
 }
 
 function assignPlatformReadingOrder() {
@@ -1095,6 +1149,7 @@ function assignPlatformReadingOrder() {
     .forEach((platform, index) => {
       platform.readingIndex = index;
     });
+  rebuildPlatformIndexes();
 }
 
 function hasTextSelection() {
@@ -1105,11 +1160,7 @@ function selectedPlatforms() {
   if (!hasTextSelection()) return [];
   const startIndex = Math.min(textSelection.startIndex, textSelection.endIndex);
   const endIndex = Math.max(textSelection.startIndex, textSelection.endIndex);
-  return world.platforms.filter((platform) => (
-    Number.isFinite(platform.readingIndex)
-    && platform.readingIndex >= startIndex
-    && platform.readingIndex <= endIndex
-  ));
+  return world.platformsByReadingIndex.slice(startIndex, endIndex + 1).filter(Boolean);
 }
 
 function lineGroupsForPlatforms(platforms) {
@@ -1208,18 +1259,14 @@ function annotationReadingIndexRange(annotation) {
 function annotationPlatforms(annotation) {
   const range = annotationReadingIndexRange(annotation);
   if (range) {
-    return world.platforms.filter((platform) => (
-      Number.isFinite(platform.readingIndex)
-      && platform.readingIndex >= range.start
-      && platform.readingIndex <= range.end
-    ));
+    return world.platformsByReadingIndex.slice(range.start, range.end + 1).filter(Boolean);
   }
   return platformsFromAnnotationRects(annotation?.rects || []);
 }
 
 function platformAtReadingIndex(readingIndex) {
   if (!Number.isFinite(readingIndex)) return null;
-  return world.platforms.find((platform) => platform.readingIndex === readingIndex) || null;
+  return world.platformsByReadingIndex[readingIndex] || null;
 }
 
 function annotationStartPlatform(annotation) {
@@ -2709,7 +2756,7 @@ function showBlade(direction, kind = "attack") {
 
 function activeLineMarkerBounds(lineId) {
   if (!lineId) return null;
-  const platforms = world.platforms.filter((platform) => platform.lineId === lineId);
+  const platforms = world.platformsByLineId.get(lineId) || [];
   if (!platforms.length) return null;
 
   const left = Math.min(...platforms.map((platform) => platform.x));
@@ -2776,11 +2823,98 @@ function renderActiveLineMarker(lineId) {
 function clearPdfDocument() {
   clearBladeSwing();
   removeActiveQuizEnemy();
+  if (pdfPageObserver) {
+    pdfPageObserver.disconnect();
+    pdfPageObserver = null;
+  }
+  pdfPageRenderQueue = [];
+  pdfPageRenderActiveCount = 0;
   pdfDocument.replaceChildren();
   pdfDocument.append(playerSprite);
   pdfDocument.style.width = "";
   pdfDocument.style.height = "";
   setPdfViewportSize();
+}
+
+function queuePdfPageRender(pageInfo, loadVersion = pdfLoadVersion) {
+  if (!pageInfo || pageInfo.renderState === "done" || pageInfo.renderState === "queued" || pageInfo.renderState === "rendering") return;
+  pageInfo.renderState = "queued";
+  pdfPageRenderQueue.push({ pageInfo, loadVersion });
+  pumpPdfPageRenderQueue();
+}
+
+function setupLazyPdfPageRendering(loadVersion = pdfLoadVersion) {
+  if (pdfPageObserver) pdfPageObserver.disconnect();
+  pdfPageObserver = null;
+  pdfPageRenderQueue = [];
+  pdfPageRenderActiveCount = 0;
+
+  if (!window.IntersectionObserver) {
+    for (const pageInfo of world.pages) queuePdfPageRender(pageInfo, loadVersion);
+    return;
+  }
+
+  pdfPageObserver = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      const pageNumber = Number(entry.target.dataset.pageNumber);
+      const pageInfo = world.pages[pageNumber - 1];
+      queuePdfPageRender(pageInfo, loadVersion);
+      pdfPageObserver?.unobserve(entry.target);
+    }
+  }, {
+    root: null,
+    rootMargin: PDF_PAGE_RENDER_ROOT_MARGIN,
+    threshold: 0.01,
+  });
+
+  for (const pageInfo of world.pages) {
+    pdfPageObserver.observe(pageInfo.element);
+  }
+
+  const activePageInfo = world.pages[Math.max(0, (world.activePage || 1) - 1)];
+  queuePdfPageRender(activePageInfo, loadVersion);
+}
+
+function pumpPdfPageRenderQueue() {
+  while (pdfPageRenderActiveCount < PDF_PAGE_RENDER_CONCURRENCY && pdfPageRenderQueue.length) {
+    const { pageInfo, loadVersion } = pdfPageRenderQueue.shift();
+    if (!pageInfo || pageInfo.renderState !== "queued") continue;
+    renderPdfPageBitmap(pageInfo, loadVersion);
+  }
+}
+
+async function renderPdfPageBitmap(pageInfo, loadVersion = pdfLoadVersion) {
+  if (!pageInfo || pageInfo.renderState === "done" || pageInfo.renderState === "rendering") return;
+  pageInfo.renderState = "rendering";
+  pageInfo.element.classList.add("is-rendering");
+  pdfPageRenderActiveCount += 1;
+
+  try {
+    assertCurrentPdfLoad(loadVersion);
+    const page = pageInfo.pdfPage;
+    const canvas = pageInfo.element;
+    const context = canvas.getContext("2d", { alpha: false });
+    context.fillStyle = "#fff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    const renderOptions = { canvasContext: context, viewport: pageInfo.viewport };
+    if (pdfjsLib.AnnotationMode?.DISABLE !== undefined) {
+      renderOptions.annotationMode = pdfjsLib.AnnotationMode.DISABLE;
+    }
+    await page.render(renderOptions).promise;
+    assertCurrentPdfLoad(loadVersion);
+    pageInfo.renderState = "done";
+    canvas.classList.add("is-rendered");
+  } catch (error) {
+    if (!isStalePdfLoad(error)) {
+      console.error(error);
+      pageInfo.renderState = "pending";
+    }
+  } finally {
+    pageInfo.element.classList.remove("is-rendering");
+    pdfPageRenderActiveCount = Math.max(0, pdfPageRenderActiveCount - 1);
+    pumpPdfPageRenderQueue();
+  }
 }
 
 function setLoadingPdf(isLoading) {
@@ -2821,7 +2955,11 @@ function resetAfterPdfLoadError() {
   world.loaded = false;
   world.pages = [];
   world.platforms = [];
+  world.platformsByPage = new Map();
+  world.platformsByLineId = new Map();
+  world.platformsByReadingIndex = [];
   world.portals = [];
+  world.portalsByPage = new Map();
   currentPdfBytes = null;
   world.annotations = [];
   world.messageAnnotations = [];
@@ -2893,7 +3031,11 @@ async function loadPdf(source, loadVersion = nextPdfLoadVersion()) {
   world.renderWidth = availableWidth;
   world.pages = [];
   world.platforms = [];
+  world.platformsByPage = new Map();
+  world.platformsByLineId = new Map();
+  world.platformsByReadingIndex = [];
   world.portals = [];
+  world.portalsByPage = new Map();
   world.annotations = [];
   world.messageAnnotations = [];
   world.quizAnnotations = [];
@@ -2916,15 +3058,11 @@ async function loadPdf(source, loadVersion = nextPdfLoadVersion()) {
     pageCanvas.style.width = `${viewport.width}px`;
     pageCanvas.style.height = `${viewport.height}px`;
     pageCanvas.style.marginTop = pageNumber === 1 ? "0" : `${world.pageGap}px`;
-    const pageCtx = pageCanvas.getContext("2d");
+    pageCanvas.dataset.pageNumber = String(pageNumber);
+    pageCanvas.classList.add("is-pending-render");
+    const pageCtx = pageCanvas.getContext("2d", { alpha: false });
     pageCtx.fillStyle = "#fff";
     pageCtx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
-    const renderOptions = { canvasContext: pageCtx, viewport };
-    if (pdfjsLib.AnnotationMode?.DISABLE !== undefined) {
-      renderOptions.annotationMode = pdfjsLib.AnnotationMode.DISABLE;
-    }
-    await page.render(renderOptions).promise;
-    assertCurrentPdfLoad(loadVersion);
 
     const textContent = await page.getTextContent();
     assertCurrentPdfLoad(loadVersion);
@@ -2959,6 +3097,8 @@ async function loadPdf(source, loadVersion = nextPdfLoadVersion()) {
       height: viewport.height,
       viewport,
       annotations: pageAnnotations,
+      pdfPage: page,
+      renderState: "pending",
     });
     world.platforms.push(...pagePlatforms);
     offsetY += viewport.height + world.pageGap;
@@ -2991,6 +3131,7 @@ async function loadPdf(source, loadVersion = nextPdfLoadVersion()) {
   renderSelectionLayer();
   resetPlayer();
   updateActivePage();
+  setupLazyPdfPageRendering(loadVersion);
   updateQuizGame();
   setLoadingPdf(false);
   playerSprite.hidden = false;
@@ -3067,11 +3208,9 @@ function activeCollisionPlatforms() {
   const activePage = page?.number || world.activePage;
   const playerTop = player.y - 240;
   const playerBottom = player.y + player.height + 240;
-  return world.platforms.filter((platform) => {
-    const nearPage = Math.abs(platform.page - activePage) <= 1;
-    const nearPlayer = platform.y + platform.height >= playerTop && platform.y <= playerBottom;
-    return nearPage && nearPlayer;
-  });
+  return platformsOnPages(activePage - 1, activePage + 1).filter((platform) => (
+    platform.y + platform.height >= playerTop && platform.y <= playerBottom
+  ));
 }
 
 function activeWrapPortals() {
@@ -3080,11 +3219,9 @@ function activeWrapPortals() {
   const activePage = page?.number || world.activePage;
   const playerTop = player.y - 240;
   const playerBottom = player.y + player.height + 240;
-  return world.portals.filter((portal) => {
-    const nearPage = Math.abs(portal.page - activePage) <= 1;
-    const nearPlayer = portal.y + portal.height >= playerTop && portal.y <= playerBottom;
-    return nearPage && nearPlayer;
-  });
+  return portalsOnPages(activePage - 1, activePage + 1).filter((portal) => (
+    portal.y + portal.height >= playerTop && portal.y <= playerBottom
+  ));
 }
 
 function renderQuizPrompt(quiz) {
