@@ -609,7 +609,7 @@ function updateMessageAnnotationsButtonLabel() {
 function updateQuizPauseButtonLabel() {
   if (!quizPauseButton) return;
   const key = quizEnemiesPaused ? "resumeEnemies" : "pauseEnemies";
-  const canPause = world.loaded && quizzesEnabled && world.quizAnnotations.length > 0;
+  const canPause = canPauseQuizEnemies();
   quizPauseButton.dataset.i18n = key;
   quizPauseButton.textContent = t(key);
   quizPauseButton.setAttribute("aria-pressed", String(quizEnemiesPaused));
@@ -680,11 +680,29 @@ function setPdfViewScale(scale) {
   applyPdfViewScale({ centerPlayer: true });
 }
 
+function canPauseQuizEnemies() {
+  return world.loaded && quizzesEnabled && world.quizAnnotations.length > 0;
+}
+
+function isMobileTopbarGamePaused() {
+  return isMobileDevice() && !topbarHidden;
+}
+
+function applyMobileTopbarPauseState() {
+  if (!isMobileTopbarGamePaused()) return;
+  clearVirtualControllerInput();
+  if (canPauseQuizEnemies() && !quizEnemiesPaused) {
+    setQuizEnemiesPaused(true);
+  }
+}
+
 function setTopbarHidden(isHidden) {
   topbarHidden = isHidden;
   topbar.classList.toggle("is-hidden", topbarHidden);
   updateTopbarToggleButton();
   updateStickyTopbarHeight();
+  applyMobileTopbarPauseState();
+  updateResponsiveUiState();
 }
 
 function setTouchControllerEnabled(isEnabled) {
@@ -1992,6 +2010,7 @@ function selectedAnnotation() {
 }
 
 function focusSelectedAnnotation() {
+  if (isMobileTopbarGamePaused()) return;
   const annotation = selectedAnnotation();
   const rect = annotationStartRect(annotation);
   if (!rect || !world.loaded) return;
@@ -3367,6 +3386,7 @@ async function loadPdf(source, loadVersion = nextPdfLoadVersion()) {
   assignPlatformReadingOrder();
   importPdfAnnotations();
   updateQuizPauseButtonLabel();
+  applyMobileTopbarPauseState();
   updateQuizToggleButtonLabel();
   renderCollisionLayer();
   renderAnnotationLayer();
@@ -3790,6 +3810,7 @@ function setQuizzesEnabled(isEnabled) {
   quizEnemiesPaused = false;
   updateQuizToggleButtonLabel();
   updateQuizPauseButtonLabel();
+  applyMobileTopbarPauseState();
   if (!quizzesEnabled) {
     removeActiveQuizEnemy();
     renderQuizPrompt(null);
@@ -4147,6 +4168,7 @@ function teleportPlayerToClick(event) {
   if (
     teleportSuppressedPointerEvents.has(event)
     || !world.loaded
+    || isMobileTopbarGamePaused()
     || annotationMenuMode
     || activeMessageAnnotationId
     || event.button !== 0
@@ -4262,11 +4284,13 @@ function updateResponsiveUiState(gamepad = activeGamepad()) {
   const touchControllerActiveNow = mobile
     && !hasExternalController
     && touchControllerEnabled
-    && !pauseTouchControllerForMessage;
+    && !pauseTouchControllerForMessage
+    && !isMobileTopbarGamePaused();
   document.body.classList.toggle("is-mobile-device", mobile);
   document.body.classList.toggle("has-external-controller", hasExternalController);
   document.body.classList.toggle("is-annotation-menu-mode", annotationMenuMode);
   document.body.classList.toggle("is-touch-controller-active", touchControllerActiveNow);
+  document.body.classList.toggle("is-mobile-topbar-paused", isMobileTopbarGamePaused());
   touchControllerOverlay?.setAttribute("aria-hidden", String(!touchControllerActiveNow));
   touchControllerToggleButton?.setAttribute("aria-hidden", String(!mobile || hasExternalController));
   updateTouchControllerToggleButton();
@@ -4426,6 +4450,18 @@ function storePreviousControllerState(pressedButtons) {
 function updateControllerInput() {
   const gamepad = activeGamepad();
   updateResponsiveUiState(gamepad);
+  if (isMobileTopbarGamePaused()) {
+    clearVirtualControllerInput();
+    controllerDirections.left = false;
+    controllerDirections.right = false;
+    controllerDirections.up = false;
+    controllerDirections.down = false;
+    controllerButtons.clear();
+    storePreviousControllerState(new Set());
+    player.jumpHeld = false;
+    player.dropThrough = false;
+    return;
+  }
   const pressedButtons = controllerPressedButtons(gamepad);
   const axisX = dominantControllerAxis(gamepad?.axes?.[0] || 0, virtualControllerSticks.left.x);
   const axisY = dominantControllerAxis(gamepad?.axes?.[1] || 0, virtualControllerSticks.left.y);
@@ -4545,7 +4581,7 @@ function updateControllerInput() {
 
 function tick() {
   updateControllerInput();
-  if (world.loaded && !annotationMenuMode && !activeMessageAnnotationId) {
+  if (world.loaded && !annotationMenuMode && !activeMessageAnnotationId && !isMobileTopbarGamePaused()) {
     updatePlayer();
     updateQuizGame();
   }
@@ -4743,8 +4779,17 @@ downloadAnnotatedButton.addEventListener("click", () => {
   downloadAnnotatedPdf();
 });
 
-topbarToggleButton.addEventListener("click", () => {
+topbarToggleButton.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
   setTopbarHidden(!topbarHidden);
+});
+
+["pointerdown", "pointerup", "click", "dblclick"].forEach((type) => {
+  topbar?.addEventListener(type, (event) => {
+    if (!isMobileDevice()) return;
+    event.stopPropagation();
+  }, { capture: true });
 });
 
 pdfZoomOutButton?.addEventListener("click", () => {
@@ -4781,8 +4826,15 @@ messageAnnotationsButton.addEventListener("click", () => {
   renderPlayer();
 });
 
-quizPauseButton?.addEventListener("click", () => {
-  setQuizEnemiesPaused(!quizEnemiesPaused);
+quizPauseButton?.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  if (quizPauseButton.disabled) return;
+  const nextPaused = !quizEnemiesPaused;
+  setQuizEnemiesPaused(nextPaused);
+  if (!nextPaused && isMobileDevice() && !topbarHidden) {
+    setTopbarHidden(true);
+  }
 });
 
 quizToggleButton?.addEventListener("click", () => {
@@ -4938,6 +4990,10 @@ window.matchMedia?.("(prefers-color-scheme: dark)")
 window.addEventListener("wheel", markManualScrollIntent, { passive: true });
 window.addEventListener("touchmove", markManualScrollIntent, { passive: true });
 document.addEventListener("pointerdown", (event) => {
+  if (isMobileTopbarGamePaused() && !eventPathIncludesElement(event, topbar)) {
+    teleportSuppressedPointerEvents.add(event);
+    return;
+  }
   const target = pointerTargetElement(event);
   if (
     !annotationMenuMode
