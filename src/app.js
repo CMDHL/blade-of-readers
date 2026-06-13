@@ -10,6 +10,8 @@ const touchControllerToggleButton = document.querySelector("#touchControllerTogg
 const readerStage = document.querySelector(".reader-stage");
 const playerSprite = document.querySelector("#playerSprite");
 const input = document.querySelector("#pdfInput");
+const openLocalPdfButton = document.querySelector("#openLocalPdfButton");
+const saveAnnotatedButton = document.querySelector("#saveAnnotatedButton");
 const downloadAnnotatedButton = document.querySelector("#downloadAnnotatedButton");
 const annotationSidebar = document.querySelector("#annotationSidebar");
 const annotationList = document.querySelector("#annotationList");
@@ -230,6 +232,7 @@ let currentStatus = { key: "waiting", values: {} };
 let currentPageText = { page: 1, total: null };
 let currentPdfBytes = null;
 let currentPdfName = "document.pdf";
+let currentPdfFileHandle = null;
 let pdfPageObserver = null;
 let pdfPageRenderQueue = [];
 let pdfPageRenderActiveCount = 0;
@@ -274,7 +277,9 @@ const translations = {
     zoomOut: "Zoom out",
     zoomIn: "Zoom in",
     resetZoom: "Reset zoom",
+    openLocalPdf: "Open PDF",
     uploadPdf: "Upload PDF",
+    saveAnnotated: "Save PDF",
     copySelection: "Copy",
     highlightSelection: "Highlight",
     commentSelection: "Comment",
@@ -352,6 +357,9 @@ const translations = {
     commentAdded: "Comment added.",
     commentPrompt: "Comment for selected text:",
     writingPdf: "Writing annotated PDF...",
+    savingPdf: "Saving PDF...",
+    pdfSaved: "PDF saved.",
+    saveCancelled: "Save cancelled.",
     annotatedPdfReady: "PDF exported.",
     pdfWriteError: "Could not write annotations into that PDF.",
     pdfLibMissing: "PDF annotation export is still loading. Try again in a moment.",
@@ -370,7 +378,9 @@ const translations = {
     zoomOut: "缩小",
     zoomIn: "放大",
     resetZoom: "重置缩放",
+    openLocalPdf: "打开 PDF",
     uploadPdf: "上传 PDF",
+    saveAnnotated: "保存 PDF",
     copySelection: "复制",
     highlightSelection: "高亮",
     commentSelection: "评论",
@@ -448,6 +458,9 @@ const translations = {
     commentAdded: "已添加评论。",
     commentPrompt: "给选中文字添加评论：",
     writingPdf: "正在写入批注 PDF...",
+    savingPdf: "正在保存 PDF...",
+    pdfSaved: "已保存 PDF。",
+    saveCancelled: "已取消保存。",
     annotatedPdfReady: "已导出 PDF。",
     pdfWriteError: "无法把批注写入这个 PDF。",
     pdfLibMissing: "PDF 批注导出还在加载，请稍后再试。",
@@ -1648,6 +1661,7 @@ function updateAnnotationControls() {
   annotationRadial?.querySelectorAll(".annotation-radial-option").forEach((option) => {
     option.classList.toggle("is-disabled", !canUseSelection);
   });
+  saveAnnotatedButton.disabled = !currentPdfBytes || !currentPdfFileHandle;
   downloadAnnotatedButton.disabled = !currentPdfBytes;
   updateSelectionActionHint();
 }
@@ -2624,6 +2638,42 @@ function downloadBytes(bytes, name) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function localFileAccessSupported() {
+  return typeof window.showOpenFilePicker === "function"
+    && typeof window.showSaveFilePicker === "function";
+}
+
+async function verifyWritableFileHandle(fileHandle) {
+  if (!fileHandle) return false;
+  const options = { mode: "readwrite" };
+  if ((await fileHandle.queryPermission?.(options)) === "granted") return true;
+  return (await fileHandle.requestPermission?.(options)) === "granted";
+}
+
+function pdfPickerOptions() {
+  return {
+    types: [{
+      description: "PDF files",
+      accept: { "application/pdf": [".pdf"] },
+    }],
+    excludeAcceptAllOption: false,
+  };
+}
+
+async function writePdfBytesToHandle(fileHandle, bytes) {
+  const writable = await fileHandle.createWritable();
+  await writable.write(new Blob([bytes], { type: "application/pdf" }));
+  await writable.close();
+}
+
+async function choosePdfSaveHandle() {
+  if (typeof window.showSaveFilePicker !== "function") return null;
+  return window.showSaveFilePicker({
+    suggestedName: annotationDownloadName(),
+    ...pdfPickerOptions(),
+  });
+}
+
 async function annotatedPdfBytes(spawnPlatform = currentStandingPlatform()) {
   if (!currentPdfBytes) return null;
   const hasSpawnAnnotationUpdate = Boolean(spawnPlatform);
@@ -3064,6 +3114,7 @@ function resetAfterPdfLoadError() {
   world.portals = [];
   world.portalsByPage = new Map();
   currentPdfBytes = null;
+  currentPdfFileHandle = null;
   world.annotations = [];
   world.messageAnnotations = [];
   world.quizAnnotations = [];
@@ -4413,6 +4464,37 @@ function tick() {
   requestAnimationFrame(tick);
 }
 
+async function openLocalPdfWithHandle() {
+  if (typeof window.showOpenFilePicker !== "function") return;
+  try {
+    const [fileHandle] = await window.showOpenFilePicker({
+      multiple: false,
+      ...pdfPickerOptions(),
+    });
+    const file = await fileHandle.getFile();
+    const loadVersion = nextPdfLoadVersion();
+    userPdfLoadVersion = loadVersion;
+    userPdfLoadPending = true;
+    currentPdfFileHandle = fileHandle;
+    try {
+      const loaded = await loadPdf(file, loadVersion);
+      if (loaded) userPdfLoaded = true;
+    } catch (error) {
+      if (isStalePdfLoad(error)) return;
+      currentPdfFileHandle = null;
+      console.error(error);
+      resetAfterPdfLoadError();
+    } finally {
+      if (userPdfLoadVersion === loadVersion) userPdfLoadPending = false;
+      updateAnnotationControls();
+    }
+  } catch (error) {
+    if (error?.name === "AbortError") return;
+    console.error(error);
+    resetAfterPdfLoadError();
+  }
+}
+
 async function loadTutorialPdfForLanguage(language = currentLanguage) {
   if (userPdfLoaded || userPdfLoadPending) return;
   const loadVersion = nextPdfLoadVersion();
@@ -4427,6 +4509,7 @@ async function loadTutorialPdfForLanguage(language = currentLanguage) {
 
 async function handlePdfFile(file) {
   if (!file) return;
+  currentPdfFileHandle = null;
   const loadVersion = nextPdfLoadVersion();
   userPdfLoadVersion = loadVersion;
   userPdfLoadPending = true;
@@ -4467,6 +4550,36 @@ async function copySelectedText() {
   }
 }
 
+async function saveAnnotatedPdf() {
+  if (!currentPdfBytes || !currentPdfFileHandle) return;
+
+  try {
+    const hasPermission = await verifyWritableFileHandle(currentPdfFileHandle);
+    if (!hasPermission) {
+      setStatus("saveCancelled");
+      return;
+    }
+
+    const spawnPlatform = updateSpawnAnnotationFromPlayer();
+    setStatus("savingPdf");
+    const bytes = await annotatedPdfBytes(spawnPlatform);
+    if (!bytes) return;
+
+    await writePdfBytesToHandle(currentPdfFileHandle, bytes);
+    currentPdfName = currentPdfFileHandle.name || currentPdfName;
+    currentPdfBytes = bytes.slice(0);
+    setStatus("pdfSaved");
+    updateAnnotationControls();
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      setStatus("saveCancelled");
+      return;
+    }
+    console.error(error);
+    setStatus(error.message === "pdf-lib-missing" ? "pdfLibMissing" : "pdfWriteError");
+  }
+}
+
 async function downloadAnnotatedPdf() {
   if (!currentPdfBytes) return;
 
@@ -4482,6 +4595,17 @@ async function downloadAnnotatedPdf() {
     setStatus(error.message === "pdf-lib-missing" ? "pdfLibMissing" : "pdfWriteError");
   }
 }
+
+if (!localFileAccessSupported()) {
+  openLocalPdfButton.hidden = true;
+}
+if (typeof window.showSaveFilePicker !== "function") {
+  saveAnnotatedButton.hidden = true;
+}
+
+openLocalPdfButton.addEventListener("click", () => {
+  openLocalPdfWithHandle();
+});
 
 input.addEventListener("change", async (event) => {
   await handlePdfFile(event.target.files?.[0]);
@@ -4518,6 +4642,10 @@ annotationList.addEventListener("click", (event) => {
   if (!entry) return;
   selectedAnnotationIndex = Number(entry.dataset.annotationIndex) || 0;
   setAnnotationMenuMode(true);
+});
+
+saveAnnotatedButton.addEventListener("click", () => {
+  saveAnnotatedPdf();
 });
 
 downloadAnnotatedButton.addEventListener("click", () => {

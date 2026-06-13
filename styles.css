@@ -193,6 +193,7 @@ p {
 }
 
 .actions .upload-button,
+.actions #openLocalPdfButton,
 .actions button,
 .actions .language-control select,
 .actions .theme-control select {
@@ -282,7 +283,8 @@ button,
   min-width: 112px;
 }
 
-html[data-reader-theme="dark"] .upload-button {
+html[data-reader-theme="dark"] .upload-button,
+html[data-reader-theme="dark"] #openLocalPdfButton {
   color: #071310;
 }
 
@@ -291,14 +293,16 @@ html[data-reader-theme="dark"] .brand-mark {
 }
 
 
-.upload-button {
+.upload-button,
+#openLocalPdfButton {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
   font-weight: 700;
 }
 
-.upload-button:hover {
+.upload-button:hover,
+#openLocalPdfButton:hover {
   background: var(--accent-dark);
 }
 
