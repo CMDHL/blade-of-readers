@@ -1,9 +1,23 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-reader-theme="dark" style="color-scheme: dark;">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Blade of Readers</title>
+
+    <script>
+      (() => {
+        const key = "bladeOfReadersTheme";
+        const saved = localStorage.getItem(key);
+        const preference = ["auto", "light", "dark"].includes(saved) ? saved : "dark";
+        const hour = new Date().getHours();
+        const night = hour >= 19 || hour < 7;
+        const systemDark = window.matchMedia?.("(prefers-color-scheme: dark)")?.matches;
+        const theme = preference === "auto" ? (night || systemDark ? "dark" : "light") : preference;
+        document.documentElement.dataset.readerTheme = theme;
+        document.documentElement.style.colorScheme = theme;
+      })();
+    </script>
     <link rel="stylesheet" href="styles.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
     <script src="src/app.js" type="module"></script>
@@ -29,11 +43,11 @@
               </select>
             </label>
             <label class="theme-control">
-              <span data-i18n="themeLabel">Eye mode</span>
-              <select id="themeSelect" aria-label="Eye mode" data-i18n-attr="aria-label:themeLabel">
+              <span data-i18n="themeLabel">Theme</span>
+              <select id="themeSelect" aria-label="Theme" data-i18n-attr="aria-label:themeLabel">
                 <option value="auto" data-i18n="themeAuto">Auto</option>
                 <option value="light" data-i18n="themeLight">Light</option>
-                <option value="eye" data-i18n="themeEye">Eye</option>
+                <option value="dark" data-i18n="themeDark">Dark</option>
               </select>
             </label>
             <label class="upload-button">

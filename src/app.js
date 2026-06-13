@@ -223,8 +223,8 @@ let quizzesEnabled = true;
 let autoScrollEnabled = true;
 let programmaticScrollUntil = 0;
 let currentLanguage = "en";
-let currentThemePreference = "auto";
-let currentReaderTheme = "light";
+let currentThemePreference = "dark";
+let currentReaderTheme = "dark";
 let themeAutoTimer = null;
 let currentStatus = { key: "waiting", values: {} };
 let currentPageText = { page: 1, total: null };
@@ -255,6 +255,10 @@ const textSelection = {
 };
 let activeBladeSwing = null;
 let activeQuizEnemy = null;
+let renderedQuizPromptKey = null;
+let renderedQuizAnswerLayerKey = null;
+let stickyTopbarHeightRaf = 0;
+let responsiveUiStateRaf = 0;
 const teleportSuppressedPointerEvents = new WeakSet();
 
 const translations = {
@@ -262,10 +266,10 @@ const translations = {
     appName: "Blade of Readers",
     tagline: "Convert complicated articles into simple platformer levels.",
     languageLabel: "Language",
-    themeLabel: "Eye mode",
+    themeLabel: "Theme",
     themeAuto: "Auto",
     themeLight: "Light",
-    themeEye: "Eye",
+    themeDark: "Dark",
     zoomLabel: "Zoom",
     zoomOut: "Zoom out",
     zoomIn: "Zoom in",
@@ -358,10 +362,10 @@ const translations = {
     appName: "读者之刃",
     tagline: "把晦涩的文章变成简单的平台跳跃游戏。",
     languageLabel: "语言",
-    themeLabel: "护眼模式",
+    themeLabel: "主题",
     themeAuto: "自动",
     themeLight: "浅色",
-    themeEye: "护眼",
+    themeDark: "深色",
     zoomLabel: "缩放",
     zoomOut: "缩小",
     zoomIn: "放大",
@@ -464,23 +468,23 @@ function detectLanguage() {
 
 function detectThemePreference() {
   const savedTheme = localStorage.getItem("bladeOfReadersTheme");
-  return ["auto", "light", "eye"].includes(savedTheme) ? savedTheme : "auto";
+  return ["auto", "light", "dark"].includes(savedTheme) ? savedTheme : "dark";
 }
 
-function isAutoEyeModeTime(date = new Date()) {
+function isAutoDarkModeTime(date = new Date()) {
   const hour = date.getHours();
   return hour >= THEME_AUTO_NIGHT_START_HOUR || hour < THEME_AUTO_NIGHT_END_HOUR;
 }
 
 function resolveReaderTheme(preference = currentThemePreference) {
-  if (preference === "light" || preference === "eye") return preference;
+  if (preference === "light" || preference === "dark") return preference;
 
   // Auto follows local device time. Also respect the OS dark preference when it is set,
   // because that is another strong signal that the user wants low-light UI.
   const systemPrefersDark = Boolean(
     window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches,
   );
-  return (isAutoEyeModeTime() || systemPrefersDark) ? "eye" : "light";
+  return (isAutoDarkModeTime() || systemPrefersDark) ? "dark" : "light";
 }
 
 function scheduleThemeAutoRefresh() {
@@ -503,15 +507,15 @@ function updateThemeControl() {
   themeSelect.value = currentThemePreference;
   themeSelect.setAttribute("aria-label", t("themeLabel"));
   themeSelect.title = currentThemePreference === "auto"
-    ? `${t("themeAuto")} · ${currentReaderTheme === "eye" ? t("themeEye") : t("themeLight")}`
-    : t(currentReaderTheme === "eye" ? "themeEye" : "themeLight");
+    ? `${t("themeAuto")} · ${currentReaderTheme === "dark" ? t("themeDark") : t("themeLight")}`
+    : t(currentReaderTheme === "dark" ? "themeDark" : "themeLight");
 }
 
 function applyReaderTheme(preference = currentThemePreference, { save = true } = {}) {
-  currentThemePreference = ["auto", "light", "eye"].includes(preference) ? preference : "auto";
+  currentThemePreference = ["auto", "light", "dark"].includes(preference) ? preference : "dark";
   currentReaderTheme = resolveReaderTheme(currentThemePreference);
   document.documentElement.dataset.readerTheme = currentReaderTheme;
-  document.documentElement.style.colorScheme = currentReaderTheme === "eye" ? "dark" : "light";
+  document.documentElement.style.colorScheme = currentReaderTheme === "dark" ? "dark" : "light";
   if (save) localStorage.setItem("bladeOfReadersTheme", currentThemePreference);
   updateThemeControl();
   scheduleThemeAutoRefresh();
@@ -525,11 +529,6 @@ function t(key, values = {}) {
 function setStatus(key, values = {}) {
   currentStatus = { key, values };
   statusText.textContent = t(key, values);
-}
-
-function updateHorizontalChromeOffset() {
-  const pageLeft = window.visualViewport?.pageLeft ?? window.scrollX;
-  document.documentElement.style.setProperty("--page-scroll-x", `${Math.max(0, pageLeft)}px`);
 }
 
 function updatePageText(page = currentPageText.page, total = currentPageText.total) {
@@ -607,7 +606,6 @@ function applyPdfViewScale({ centerPlayer = false } = {}) {
   pdfViewScale = clampPdfViewScale(pdfViewScale);
   pdfDocument.style.transform = `scale(${pdfViewScale})`;
   document.body.classList.toggle("is-pdf-zoomed", pdfViewScale > 1);
-  updateHorizontalChromeOffset();
   setPdfViewportSize();
   updatePdfZoomControls();
   if (centerPlayer) restartAutoScroll();
@@ -717,7 +715,26 @@ function updateControlLabels() {
 
 function updateStickyTopbarHeight() {
   const height = topbarHidden ? 0 : Math.ceil(topbar?.getBoundingClientRect().height || 0);
-  document.documentElement.style.setProperty("--sticky-topbar-height", `${height}px`);
+  const value = `${height}px`;
+  if (document.documentElement.style.getPropertyValue("--sticky-topbar-height") !== value) {
+    document.documentElement.style.setProperty("--sticky-topbar-height", value);
+  }
+}
+
+function scheduleStickyTopbarHeightUpdate() {
+  if (stickyTopbarHeightRaf) return;
+  stickyTopbarHeightRaf = requestAnimationFrame(() => {
+    stickyTopbarHeightRaf = 0;
+    updateStickyTopbarHeight();
+  });
+}
+
+function scheduleResponsiveUiStateUpdate() {
+  if (responsiveUiStateRaf) return;
+  responsiveUiStateRaf = requestAnimationFrame(() => {
+    responsiveUiStateRaf = 0;
+    updateResponsiveUiState();
+  });
 }
 
 function viewportSize() {
@@ -3312,8 +3329,12 @@ function activeWrapPortals() {
 
 function renderQuizPrompt(quiz) {
   if (!quizPrompt) return;
+  const text = quiz ? quiz.quizPrompt || "" : "";
+  const key = quiz ? `${quiz.id}|${text}` : "";
+  if (renderedQuizPromptKey === key) return;
+  renderedQuizPromptKey = key;
   quizPrompt.hidden = !quiz;
-  quizPrompt.textContent = quiz ? quiz.quizPrompt || "" : "";
+  if (quizPrompt.textContent !== text) quizPrompt.textContent = text;
 }
 
 function quizStartPage(quiz) {
@@ -3334,14 +3355,20 @@ function quizAnswerRects(quiz) {
   return rectsForLineGroups(lineGroupsForPlatforms(annotationPlatforms(quiz)));
 }
 
-function renderQuizAnswerLayer() {
-  pdfDocument.querySelector(".quiz-answer-layer")?.remove();
-  if (!world.loaded || !quizzesEnabled) return;
+function renderQuizAnswerLayer({ force = false } = {}) {
+  const defeatingQuizzes = world.loaded && quizzesEnabled
+    ? world.quizAnnotations.filter((quiz) => (
+      quiz.quizState === "defeating"
+      && quizStartPage(quiz) === world.activePage
+    ))
+    : [];
+  const key = defeatingQuizzes
+    .map((quiz) => `${quiz.id}:${quiz.quizState}:${quiz.quizFadeCompleteAt}`)
+    .join("|");
+  if (!force && renderedQuizAnswerLayerKey === key) return;
+  renderedQuizAnswerLayerKey = key;
 
-  const defeatingQuizzes = world.quizAnnotations.filter((quiz) => (
-    quiz.quizState === "defeating"
-    && quizStartPage(quiz) === world.activePage
-  ));
+  pdfDocument.querySelector(".quiz-answer-layer")?.remove();
   if (!defeatingQuizzes.length) return;
 
   const layer = document.createElement("div");
@@ -3608,7 +3635,7 @@ function resetQuizState() {
     quiz.quizFadeCompleteAt = 0;
   }
   removeActiveQuizEnemy();
-  renderQuizAnswerLayer();
+  renderQuizAnswerLayer({ force: true });
   renderQuizPrompt(null);
 }
 
@@ -3626,7 +3653,7 @@ function setQuizzesEnabled(isEnabled) {
   if (!quizzesEnabled) {
     removeActiveQuizEnemy();
     renderQuizPrompt(null);
-    renderQuizAnswerLayer();
+    renderQuizAnswerLayer({ force: true });
     return;
   }
   updateQuizGame();
@@ -4671,15 +4698,13 @@ window.addEventListener("keyup", (event) => {
 });
 
 window.addEventListener("scroll", () => {
-  updateHorizontalChromeOffset();
   if (performance.now() < programmaticScrollUntil) return;
   markManualScrollIntent();
 }, { passive: true });
 
 window.addEventListener("resize", () => {
-  updateHorizontalChromeOffset();
-  updateStickyTopbarHeight();
-  updateResponsiveUiState();
+  scheduleStickyTopbarHeightUpdate();
+  scheduleResponsiveUiStateUpdate();
   if (!world.loaded) return;
   keepPlayerInVisibleWindow();
 });
@@ -4709,14 +4734,12 @@ readerStage.addEventListener("pointerdown", teleportPlayerToClick);
 
 if (window.visualViewport) {
   window.visualViewport.addEventListener("resize", () => {
-    updateHorizontalChromeOffset();
-    updateResponsiveUiState();
+      scheduleResponsiveUiStateUpdate();
     if (!world.loaded) return;
     keepPlayerInVisibleWindow();
   });
   window.visualViewport.addEventListener("scroll", () => {
-    updateHorizontalChromeOffset();
-    if (performance.now() < programmaticScrollUntil) return;
+      if (performance.now() < programmaticScrollUntil) return;
     markManualScrollIntent();
   });
 }
@@ -4724,11 +4747,10 @@ if (window.visualViewport) {
 applyReaderTheme(detectThemePreference(), { save: false });
 applyLanguage(detectLanguage());
 applyPdfViewScale();
-updateHorizontalChromeOffset();
 updateResponsiveUiState();
 loadTutorialPdfForLanguage(currentLanguage);
 if (window.ResizeObserver && topbar) {
-  new ResizeObserver(updateStickyTopbarHeight).observe(topbar);
+  new ResizeObserver(scheduleStickyTopbarHeightUpdate).observe(topbar);
 }
 mobilePointerQuery?.addEventListener?.("change", () => updateResponsiveUiState());
 window.addEventListener("gamepadconnected", (event) => updateResponsiveUiState(event.gamepad));
