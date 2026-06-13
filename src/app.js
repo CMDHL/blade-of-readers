@@ -359,6 +359,7 @@ const translations = {
     writingPdf: "Writing annotated PDF...",
     savingPdf: "Saving PDF...",
     pdfSaved: "PDF saved.",
+    pdfSavedAt: "PDF saved at {time}.",
     saveCancelled: "Save cancelled.",
     annotatedPdfReady: "PDF exported.",
     pdfWriteError: "Could not write annotations into that PDF.",
@@ -460,6 +461,7 @@ const translations = {
     writingPdf: "正在写入批注 PDF...",
     savingPdf: "正在保存 PDF...",
     pdfSaved: "已保存 PDF。",
+    pdfSavedAt: "已保存 PDF · {time}",
     saveCancelled: "已取消保存。",
     annotatedPdfReady: "已导出 PDF。",
     pdfWriteError: "无法把批注写入这个 PDF。",
@@ -542,6 +544,53 @@ function t(key, values = {}) {
 function setStatus(key, values = {}) {
   currentStatus = { key, values };
   statusText.textContent = t(key, values);
+}
+
+function formatStatusTimestamp(date = new Date()) {
+  const locale = currentLanguage === "zh" ? "zh-CN" : undefined;
+  return date.toLocaleTimeString(locale, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function triggerSaveSuccessFeedback(anchor = saveAnnotatedButton) {
+  const previousBurst = document.querySelector(".save-success-burst");
+  previousBurst?.remove();
+
+  const anchorRect = anchor?.getBoundingClientRect?.() || statusText.getBoundingClientRect();
+  const burst = document.createElement("div");
+  burst.className = "save-success-burst";
+  burst.setAttribute("aria-hidden", "true");
+  burst.style.left = `${anchorRect.left + anchorRect.width / 2}px`;
+  burst.style.top = `${anchorRect.top + anchorRect.height / 2}px`;
+
+  const colors = ["#55b7a9", "#f2c14e", "#f78166", "#8eb5ff", "#d88cff", "#6dd6a7"];
+  for (let index = 0; index < 22; index += 1) {
+    const piece = document.createElement("span");
+    const angle = -Math.PI * (0.12 + Math.random() * 0.76);
+    const distance = 42 + Math.random() * 86;
+    piece.style.setProperty("--save-confetti-x", `${Math.cos(angle) * distance}px`);
+    piece.style.setProperty("--save-confetti-y", `${Math.sin(angle) * distance - Math.random() * 28}px`);
+    piece.style.setProperty("--save-confetti-rotate", `${Math.random() * 520 - 260}deg`);
+    piece.style.setProperty("--save-confetti-color", colors[index % colors.length]);
+    piece.style.animationDelay = `${Math.random() * 80}ms`;
+    burst.append(piece);
+  }
+
+  document.body.append(burst);
+  window.setTimeout(() => burst.remove(), 1100);
+
+  saveAnnotatedButton.classList.remove("is-save-success");
+  void saveAnnotatedButton.offsetWidth;
+  saveAnnotatedButton.classList.add("is-save-success");
+  window.setTimeout(() => saveAnnotatedButton.classList.remove("is-save-success"), 900);
+
+  statusText.classList.remove("is-save-success");
+  void statusText.offsetWidth;
+  statusText.classList.add("is-save-success");
+  window.setTimeout(() => statusText.classList.remove("is-save-success"), 900);
 }
 
 function updatePageText(page = currentPageText.page, total = currentPageText.total) {
@@ -1915,7 +1964,6 @@ function setAnnotationMenuMode(isActive) {
   clampSelectedAnnotationIndex();
   updateAnnotationControls();
   renderAnnotationSidebar();
-  if (annotationMenuMode) focusSelectedAnnotation();
   updateResponsiveUiState();
   setStatus(annotationMenuMode ? "menuModeOn" : "menuModeOff");
   if (world.loaded && (!annotationMenuMode || getComputedStyle(readerStage).display !== "none")) {
@@ -1935,7 +1983,6 @@ function selectAnnotationEntry(delta) {
   const nextPosition = (currentPosition + delta + entries.length) % entries.length;
   selectedAnnotationIndex = entries[nextPosition].index;
   renderAnnotationSidebar();
-  if (annotationMenuMode) focusSelectedAnnotation();
 }
 
 function selectedAnnotation() {
@@ -1975,15 +2022,24 @@ function deleteSelectedAnnotation() {
   const annotation = selectedAnnotation();
   if (!annotation) return;
   const wasSpawnAnnotation = isSpawnAnnotation(annotation);
+  const entriesBeforeDeletion = visibleAnnotationEntries();
+  const deletedVisiblePosition = entriesBeforeDeletion.findIndex((entry) => entry.index === selectedAnnotationIndex);
 
   markPdfAnnotationForRemoval(annotation);
 
   world.annotations.splice(selectedAnnotationIndex, 1);
   if (wasSpawnAnnotation) syncSpawnPlatformFromAnnotations();
-  clampSelectedAnnotationIndex();
+
+  const entriesAfterDeletion = visibleAnnotationEntries();
+  if (entriesAfterDeletion.length) {
+    const preferredPosition = deletedVisiblePosition > 0 ? deletedVisiblePosition - 1 : 0;
+    selectedAnnotationIndex = entriesAfterDeletion[Math.min(preferredPosition, entriesAfterDeletion.length - 1)].index;
+  } else {
+    selectedAnnotationIndex = 0;
+  }
+
   renderAnnotationLayer();
   renderAnnotationSidebar();
-  if (annotationMenuMode) focusSelectedAnnotation();
   setStatus("annotationDeleted");
 }
 
@@ -2450,6 +2506,38 @@ function pdfAnnotationMatchesRemoval(pdfDoc, annotRef, removal) {
   return pdfAnnotationMatchesMetadata(annot, removal);
 }
 
+function removePdfAnnotationsByIds(pdfDoc, annotationIds) {
+  if (!annotationIds?.size) return;
+
+  pdfDoc.getPages().forEach((page) => {
+    const annots = page.node.lookupMaybe?.(PDFName.of("Annots"), PDFArray);
+    if (!annots) return;
+
+    for (let index = annots.size() - 1; index >= 0; index -= 1) {
+      const annotRef = annots.get(index);
+      const annot = lookupPdfAnnotation(pdfDoc, annotRef);
+      if (!isPdfHighlightDict(annot)) continue;
+
+      const annotationId = pdfObjectText(annot.lookup?.(PDFName.of("NM")));
+      if (annotationIds.has(annotationId)) annots.remove(index);
+    }
+  });
+}
+
+function sessionAnnotationPdfIds(annotations) {
+  const ids = new Set();
+  for (const annotation of annotations || []) {
+    const pageNumbers = new Set();
+    for (const rect of annotation.rects || []) {
+      if (Number.isInteger(rect?.page) && rect.page > 0) pageNumbers.add(rect.page);
+    }
+    for (const pageNumber of pageNumbers) {
+      ids.add(`BladeOfReaders-${annotation.id}-${pageNumber}`);
+    }
+  }
+  return ids;
+}
+
 function removePdfAnnotations(pdfDoc) {
   if (!world.removedPdfAnnotations.length) return;
 
@@ -2699,6 +2787,7 @@ async function annotatedPdfBytes(spawnPlatform = currentStandingPlatform()) {
   const pdfDoc = await PDFDocument.load(currentPdfBytes.slice(0));
   const pdfPages = pdfDoc.getPages();
   removePdfAnnotations(pdfDoc);
+  removePdfAnnotationsByIds(pdfDoc, sessionAnnotationPdfIds(sessionAnnotations));
   if (spawnPlatform) removePdfSpawnAnnotations(pdfDoc);
   updatePdfMessageAnnotations(pdfDoc);
 
@@ -4568,7 +4657,8 @@ async function saveAnnotatedPdf() {
     await writePdfBytesToHandle(currentPdfFileHandle, bytes);
     currentPdfName = currentPdfFileHandle.name || currentPdfName;
     currentPdfBytes = bytes.slice(0);
-    setStatus("pdfSaved");
+    setStatus("pdfSavedAt", { time: formatStatusTimestamp() });
+    triggerSaveSuccessFeedback();
     updateAnnotationControls();
   } catch (error) {
     if (error?.name === "AbortError") {
@@ -4642,6 +4732,7 @@ annotationList.addEventListener("click", (event) => {
   if (!entry) return;
   selectedAnnotationIndex = Number(entry.dataset.annotationIndex) || 0;
   setAnnotationMenuMode(true);
+  focusSelectedAnnotation();
 });
 
 saveAnnotatedButton.addEventListener("click", () => {
