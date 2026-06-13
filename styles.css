@@ -4,16 +4,49 @@
   --muted: #656b78;
   --paper: #f6f3ed;
   --panel: #ffffff;
+  --panel-soft: rgba(255, 255, 255, 0.7);
   --line: #d9dce3;
   --accent: #19766f;
   --accent-dark: #11544f;
   --danger: #ba3b46;
+  --chrome-tint: rgba(25, 118, 111, 0.09);
+  --chrome-tint-clear: rgba(25, 118, 111, 0);
+  --control-overlay-bg: rgba(255, 255, 255, 0.88);
+  --statusbar-bg: rgba(246, 243, 237, 0.94);
+  --button-hover-line: #aeb4c0;
+  --pdf-page-bg: #fff;
+  --pdf-page-pending-sheen: rgba(25, 118, 111, 0.06);
+  --pdf-night-filter: none;
+  --annotation-blend-mode: multiply;
   --shadow: 0 18px 60px rgba(26, 31, 44, 0.16);
   --shell-inline-padding: 18px;
   --statusbar-offset: 52px;
   --sticky-topbar-height: 156px;
   --sticky-sidebar-gap: 14px;
   --page-scroll-x: 0px;
+}
+
+html[data-reader-theme="eye"] {
+  color-scheme: dark;
+  --ink: #e9edf2;
+  --muted: #a8b1c0;
+  --paper: #11151c;
+  --panel: #1a2029;
+  --panel-soft: rgba(28, 34, 44, 0.82);
+  --line: #384353;
+  --accent: #55b7a9;
+  --accent-dark: #8fd8cd;
+  --danger: #ff7b86;
+  --chrome-tint: rgba(85, 183, 169, 0.13);
+  --chrome-tint-clear: rgba(85, 183, 169, 0);
+  --control-overlay-bg: rgba(26, 32, 41, 0.9);
+  --statusbar-bg: rgba(17, 21, 28, 0.94);
+  --button-hover-line: #6f7d90;
+  --pdf-page-bg: #111;
+  --pdf-page-pending-sheen: rgba(85, 183, 169, 0.13);
+  --pdf-night-filter: invert(0.92) hue-rotate(180deg) contrast(0.9) brightness(0.88) saturate(0.86);
+  --annotation-blend-mode: normal;
+  --shadow: 0 18px 60px rgba(0, 0, 0, 0.42);
 }
 
 * {
@@ -29,7 +62,7 @@ body {
   margin: 0;
   overflow-x: clip;
   background:
-    linear-gradient(180deg, rgba(25, 118, 111, 0.09), rgba(25, 118, 111, 0) 34%),
+    linear-gradient(180deg, var(--chrome-tint), var(--chrome-tint-clear) 34%),
     var(--paper);
   color: var(--ink);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -72,7 +105,7 @@ input {
   gap: 18px;
   padding: 18px 0 12px;
   background:
-    linear-gradient(180deg, rgba(25, 118, 111, 0.09), rgba(25, 118, 111, 0) 100%),
+    linear-gradient(180deg, var(--chrome-tint), var(--chrome-tint-clear) 100%),
     var(--paper);
 }
 
@@ -88,8 +121,8 @@ input {
   min-width: 78px;
   min-height: 34px;
   padding: 0 10px;
-  border-color: rgba(25, 118, 111, 0.38);
-  background: rgba(255, 255, 255, 0.88);
+  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
+  background: var(--control-overlay-bg);
   backdrop-filter: blur(10px);
   color: var(--accent-dark);
   font-size: 0.78rem;
@@ -105,8 +138,8 @@ input {
   min-width: 84px;
   min-height: 34px;
   padding: 0 10px;
-  border-color: rgba(25, 118, 111, 0.38);
-  background: rgba(255, 255, 255, 0.88);
+  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
+  background: var(--control-overlay-bg);
   backdrop-filter: blur(10px);
   color: var(--accent-dark);
   font-size: 0.78rem;
@@ -163,14 +196,16 @@ p {
 
 .actions .upload-button,
 .actions button,
-.actions .language-control select {
+.actions .language-control select,
+.actions .theme-control select {
   min-height: 34px;
   padding: 0 10px;
   font-size: 0.78rem;
   font-weight: 800;
 }
 
-.actions .language-control {
+.actions .language-control,
+.actions .theme-control {
   font-size: 0.78rem;
 }
 
@@ -182,7 +217,7 @@ p {
   padding: 0 6px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--panel-soft);
 }
 
 .pdf-zoom-control > span {
@@ -210,7 +245,8 @@ p {
 
 .upload-button,
 button,
-.language-control select {
+.language-control select,
+.theme-control select {
   min-height: 40px;
   display: inline-flex;
   align-items: center;
@@ -224,7 +260,8 @@ button,
   box-shadow: 0 1px 0 rgba(23, 25, 31, 0.05);
 }
 
-.language-control {
+.language-control,
+.theme-control {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -232,7 +269,8 @@ button,
   font-size: 0.9rem;
 }
 
-.language-control select {
+.language-control select,
+.theme-control select {
   appearance: none;
   min-width: 92px;
   padding: 0 32px 0 12px;
@@ -241,6 +279,19 @@ button,
     linear-gradient(135deg, var(--muted) 50%, transparent 50%) calc(100% - 12px) 17px / 5px 5px no-repeat,
     var(--panel);
 }
+
+.theme-control select {
+  min-width: 112px;
+}
+
+html[data-reader-theme="eye"] .upload-button {
+  color: #071310;
+}
+
+html[data-reader-theme="eye"] .brand-mark {
+  box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.28);
+}
+
 
 .upload-button {
   background: var(--accent);
@@ -254,7 +305,7 @@ button,
 }
 
 button:hover {
-  border-color: #aeb4c0;
+  border-color: var(--button-hover-line);
 }
 
 button:disabled {
@@ -351,6 +402,167 @@ button:disabled {
   color: var(--ink);
   font-weight: 700;
   background: rgba(255, 255, 255, 0.62);
+}
+
+
+html[data-reader-theme="eye"] .controls-panel {
+  background: rgba(13, 18, 26, 0.94);
+  border-color: #2f3a4a;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+}
+
+html[data-reader-theme="eye"] .control-row button,
+html[data-reader-theme="eye"] .fixed-control {
+  background: rgba(9, 13, 19, 0.78);
+  border-color: #445166;
+  color: #e9edf2;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+html[data-reader-theme="eye"] .control-row {
+  color: #bac4d3;
+}
+
+html[data-reader-theme="eye"] .control-row button:hover,
+html[data-reader-theme="eye"] .fixed-control:hover {
+  border-color: #718095;
+  background: rgba(20, 27, 38, 0.92);
+}
+
+html[data-reader-theme="eye"] .control-row.is-interaction-ready button,
+html[data-reader-theme="eye"] .control-row.is-interaction-ready .fixed-control {
+  background: #3fa89a;
+  border-color: #62c8ba;
+  color: #06110f;
+  box-shadow:
+    0 0 0 2px rgba(98, 200, 186, 0.2),
+    0 2px 0 rgba(0, 0, 0, 0.24);
+}
+
+html[data-reader-theme="eye"] .annotation-sidebar {
+  background: rgba(13, 18, 26, 0.95);
+  border-color: #2f3a4a;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.34);
+}
+
+html[data-reader-theme="eye"] .annotation-sidebar-header {
+  background: rgba(19, 25, 35, 0.96);
+  border-bottom-color: #344052;
+}
+
+html[data-reader-theme="eye"] .annotation-list {
+  background: rgba(10, 14, 20, 0.42);
+}
+
+html[data-reader-theme="eye"] .annotation-entry {
+  border: 1px solid #344052;
+  background: rgba(21, 28, 39, 0.94);
+  color: #e9edf2;
+}
+
+html[data-reader-theme="eye"] .annotation-entry:hover {
+  border-color: #506079;
+  background: rgba(28, 37, 51, 0.98);
+}
+
+html[data-reader-theme="eye"] .annotation-entry.is-selected {
+  border-color: #6ed2c5;
+  outline: 2px solid rgba(110, 210, 197, 0.24);
+  background: rgba(42, 78, 76, 0.92);
+}
+
+html[data-reader-theme="eye"] .annotation-entry.is-selected .annotation-entry-meta {
+  color: #c4d8d8;
+}
+
+html[data-reader-theme="eye"] .annotation-entry.is-selected .annotation-entry-body {
+  color: #f4fbfa;
+}
+
+
+html[data-reader-theme="eye"] .quiz-prompt {
+  border-color: rgba(110, 210, 197, 0.55);
+  background: rgba(13, 18, 26, 0.96);
+  color: #f2fbfa;
+  box-shadow:
+    0 0 0 3px rgba(110, 210, 197, 0.12),
+    0 10px 28px rgba(0, 0, 0, 0.34);
+}
+
+html[data-reader-theme="eye"] .drop-zone,
+html[data-reader-theme="eye"] .loading-overlay {
+  color: #edf4f7;
+  background:
+    linear-gradient(rgba(13, 18, 26, 0.94), rgba(17, 23, 32, 0.97)),
+    repeating-linear-gradient(0deg, transparent 0 32px, rgba(110, 210, 197, 0.12) 32px 33px);
+  border-color: rgba(110, 210, 197, 0.34);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.34);
+}
+
+html[data-reader-theme="eye"] .drop-zone span,
+html[data-reader-theme="eye"] .loading-overlay span {
+  color: #b9c6d4;
+}
+
+html[data-reader-theme="eye"] .keys {
+  color: #8fd8cd;
+}
+
+html[data-reader-theme="eye"] .message-dialog-backdrop {
+  background: rgba(6, 9, 14, 0.62);
+}
+
+html[data-reader-theme="eye"] .message-dialog-panel {
+  border-color: #384353;
+  background: #171d26;
+  box-shadow: 0 22px 72px rgba(0, 0, 0, 0.48);
+}
+
+html[data-reader-theme="eye"] .message-dialog-actions button.is-selected {
+  border-color: rgba(110, 210, 197, 0.82);
+  outline-color: rgba(110, 210, 197, 0.24);
+}
+
+html[data-reader-theme="eye"] .message-dialog-actions button.is-choice-selected[data-message-dialog-action="good"] {
+  border-color: rgba(110, 210, 197, 0.72);
+  background: rgba(85, 183, 169, 0.16);
+  color: #bff0e9;
+}
+
+html[data-reader-theme="eye"] .message-dialog-actions button.is-choice-selected[data-message-dialog-action="bad"] {
+  border-color: rgba(255, 123, 134, 0.72);
+  background: rgba(255, 123, 134, 0.14);
+  color: #ffb4bd;
+}
+
+html[data-reader-theme="eye"] .annotation-radial {
+  border-color: #384353;
+  background: rgba(13, 18, 26, 0.94);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.42);
+}
+
+html[data-reader-theme="eye"] .annotation-radial::before {
+  border-color: rgba(185, 198, 212, 0.28);
+}
+
+html[data-reader-theme="eye"] .annotation-radial-center,
+html[data-reader-theme="eye"] .annotation-radial-option {
+  border-color: #445166;
+  background: #171d26;
+  color: #edf4f7;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.26);
+}
+
+html[data-reader-theme="eye"] .annotation-radial-option.is-selected {
+  border-color: #6ed2c5;
+  background: #3fa89a;
+  color: #06110f;
+}
+
+html[data-reader-theme="eye"] .annotation-sidebar.is-menu-mode #annotationModeLabel {
+  border-color: rgba(110, 210, 197, 0.5);
+  color: #9de4da;
+  background: rgba(85, 183, 169, 0.14);
 }
 
 .reader-layout {
@@ -554,14 +766,15 @@ button:disabled {
 
 .pdf-page {
   display: block;
-  background: #fff;
+  background: var(--pdf-page-bg);
   box-shadow: var(--shadow);
+  filter: var(--pdf-night-filter);
 }
 
 .pdf-page.is-pending-render:not(.is-rendered) {
   background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(25, 118, 111, 0.06), rgba(255, 255, 255, 0)),
-    #fff;
+    linear-gradient(90deg, transparent, var(--pdf-page-pending-sheen), transparent),
+    var(--pdf-page-bg);
 }
 
 .pdf-page.is-rendering:not(.is-rendered) {
@@ -598,7 +811,7 @@ button:disabled {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  mix-blend-mode: multiply;
+  mix-blend-mode: var(--annotation-blend-mode);
 }
 
 .annotation-layer {
@@ -618,6 +831,23 @@ button:disabled {
   border-radius: 2px;
   background: rgba(255, 209, 31, 0.4);
 }
+
+html[data-reader-theme="eye"] .pdf-annotation-highlight {
+  background: rgba(255, 209, 31, 0.26);
+}
+
+html[data-reader-theme="eye"] .selection-highlight {
+  background: rgba(127, 202, 255, 0.28);
+}
+
+html[data-reader-theme="eye"] .quiz-answer-highlight {
+  background: rgba(255, 120, 120, 0.26);
+}
+
+html[data-reader-theme="eye"] .pdf-message-platform-highlight {
+  background: rgba(158, 230, 163, 0.3);
+}
+
 
 .pdf-annotation-highlight.has-comment {
   background: rgba(25, 118, 111, 0.3);
@@ -1303,7 +1533,7 @@ body.is-mobile-device .annotation-sidebar {
   padding: 8px 0 calc(8px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   border-top: 1px solid rgba(217, 220, 227, 0.86);
-  background: rgba(246, 243, 237, 0.94);
+  background: var(--statusbar-bg);
   backdrop-filter: blur(10px);
   color: var(--muted);
   font-size: 0.9rem;
@@ -1350,11 +1580,13 @@ body.is-mobile-device .annotation-sidebar {
     justify-content: stretch;
   }
 
-  .language-control {
+  .language-control,
+  .theme-control {
     flex: 1 1 150px;
   }
 
-  .language-control select {
+  .language-control select,
+  .theme-control select {
     flex: 1;
   }
 

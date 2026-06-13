@@ -26,6 +26,7 @@ const pdfZoomResetButton = document.querySelector("#pdfZoomResetButton");
 const pdfZoomInButton = document.querySelector("#pdfZoomInButton");
 const pdfZoomValue = document.querySelector("#pdfZoomValue");
 const languageSelect = document.querySelector("#languageSelect");
+const themeSelect = document.querySelector("#themeSelect");
 const dropZone = document.querySelector("#dropZone");
 const loadingOverlay = document.querySelector("#loadingOverlay");
 const statusText = document.querySelector("#statusText");
@@ -56,6 +57,8 @@ const QUIZ_SPAWN_FADE_MS = 2000;
 const PDF_VIEW_SCALE_MIN = 1;
 const PDF_VIEW_SCALE_MAX = 2;
 const PDF_VIEW_SCALE_STEP = 0.125;
+const THEME_AUTO_NIGHT_START_HOUR = 19;
+const THEME_AUTO_NIGHT_END_HOUR = 7;
 const TUTORIAL_PDFS = {
   en: {
     name: "Tutorial_en.pdf",
@@ -220,6 +223,9 @@ let quizzesEnabled = true;
 let autoScrollEnabled = true;
 let programmaticScrollUntil = 0;
 let currentLanguage = "en";
+let currentThemePreference = "auto";
+let currentReaderTheme = "light";
+let themeAutoTimer = null;
 let currentStatus = { key: "waiting", values: {} };
 let currentPageText = { page: 1, total: null };
 let currentPdfBytes = null;
@@ -256,6 +262,10 @@ const translations = {
     appName: "Blade of Readers",
     tagline: "Convert complicated articles into simple platformer levels.",
     languageLabel: "Language",
+    themeLabel: "Eye mode",
+    themeAuto: "Auto",
+    themeLight: "Light",
+    themeEye: "Eye",
     zoomLabel: "Zoom",
     zoomOut: "Zoom out",
     zoomIn: "Zoom in",
@@ -348,6 +358,10 @@ const translations = {
     appName: "读者之刃",
     tagline: "把晦涩的文章变成简单的平台跳跃游戏。",
     languageLabel: "语言",
+    themeLabel: "护眼模式",
+    themeAuto: "自动",
+    themeLight: "浅色",
+    themeEye: "护眼",
     zoomLabel: "缩放",
     zoomOut: "缩小",
     zoomIn: "放大",
@@ -445,6 +459,62 @@ function detectLanguage() {
   if (savedLanguage && translations[savedLanguage]) return savedLanguage;
   const browserLanguage = navigator.languages?.[0] || navigator.language || "en";
   return browserLanguage.toLowerCase().startsWith("zh") ? "zh" : "en";
+}
+
+
+function detectThemePreference() {
+  const savedTheme = localStorage.getItem("bladeOfReadersTheme");
+  return ["auto", "light", "eye"].includes(savedTheme) ? savedTheme : "auto";
+}
+
+function isAutoEyeModeTime(date = new Date()) {
+  const hour = date.getHours();
+  return hour >= THEME_AUTO_NIGHT_START_HOUR || hour < THEME_AUTO_NIGHT_END_HOUR;
+}
+
+function resolveReaderTheme(preference = currentThemePreference) {
+  if (preference === "light" || preference === "eye") return preference;
+
+  // Auto follows local device time. Also respect the OS dark preference when it is set,
+  // because that is another strong signal that the user wants low-light UI.
+  const systemPrefersDark = Boolean(
+    window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches,
+  );
+  return (isAutoEyeModeTime() || systemPrefersDark) ? "eye" : "light";
+}
+
+function scheduleThemeAutoRefresh() {
+  if (themeAutoTimer) {
+    window.clearTimeout(themeAutoTimer);
+    themeAutoTimer = null;
+  }
+  if (currentThemePreference !== "auto") return;
+
+  const now = new Date();
+  const nextHour = new Date(now);
+  nextHour.setHours(now.getHours() + 1, 0, 3, 0);
+  themeAutoTimer = window.setTimeout(() => {
+    applyReaderTheme(currentThemePreference, { save: false });
+  }, Math.max(1000, nextHour.getTime() - now.getTime()));
+}
+
+function updateThemeControl() {
+  if (!themeSelect) return;
+  themeSelect.value = currentThemePreference;
+  themeSelect.setAttribute("aria-label", t("themeLabel"));
+  themeSelect.title = currentThemePreference === "auto"
+    ? `${t("themeAuto")} · ${currentReaderTheme === "eye" ? t("themeEye") : t("themeLight")}`
+    : t(currentReaderTheme === "eye" ? "themeEye" : "themeLight");
+}
+
+function applyReaderTheme(preference = currentThemePreference, { save = true } = {}) {
+  currentThemePreference = ["auto", "light", "eye"].includes(preference) ? preference : "auto";
+  currentReaderTheme = resolveReaderTheme(currentThemePreference);
+  document.documentElement.dataset.readerTheme = currentReaderTheme;
+  document.documentElement.style.colorScheme = currentReaderTheme === "eye" ? "dark" : "light";
+  if (save) localStorage.setItem("bladeOfReadersTheme", currentThemePreference);
+  updateThemeControl();
+  scheduleThemeAutoRefresh();
 }
 
 function t(key, values = {}) {
@@ -590,6 +660,7 @@ function applyLanguage(language) {
   updatePdfZoomControls();
   updateControlLabels();
   updateTouchControllerToggleButton();
+  updateThemeControl();
   updateAnnotationControls();
   renderAnnotationSidebar();
   renderAnnotationRadial();
@@ -4490,6 +4561,11 @@ languageSelect.addEventListener("change", () => {
   loadTutorialPdfForLanguage(languageSelect.value);
 });
 
+themeSelect?.addEventListener("change", () => {
+  applyReaderTheme(themeSelect.value);
+  updateStickyTopbarHeight();
+});
+
 controlsPanel.addEventListener("click", (event) => {
   const button = event.target.closest("[data-map-action]");
   if (!button) return;
@@ -4608,6 +4684,13 @@ window.addEventListener("resize", () => {
   keepPlayerInVisibleWindow();
 });
 
+window.addEventListener("focus", () => applyReaderTheme(currentThemePreference, { save: false }));
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) applyReaderTheme(currentThemePreference, { save: false });
+});
+window.matchMedia?.("(prefers-color-scheme: dark)")
+  ?.addEventListener?.("change", () => applyReaderTheme(currentThemePreference, { save: false }));
+
 window.addEventListener("wheel", markManualScrollIntent, { passive: true });
 window.addEventListener("touchmove", markManualScrollIntent, { passive: true });
 document.addEventListener("pointerdown", (event) => {
@@ -4638,6 +4721,7 @@ if (window.visualViewport) {
   });
 }
 
+applyReaderTheme(detectThemePreference(), { save: false });
 applyLanguage(detectLanguage());
 applyPdfViewScale();
 updateHorizontalChromeOffset();
