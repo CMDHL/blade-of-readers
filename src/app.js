@@ -223,7 +223,7 @@ let quizzesEnabled = true;
 let autoScrollEnabled = true;
 let programmaticScrollUntil = 0;
 let currentLanguage = "en";
-let currentThemePreference = "dark";
+let currentThemePreference = "auto";
 let currentReaderTheme = "dark";
 let themeAutoTimer = null;
 let currentStatus = { key: "waiting", values: {} };
@@ -468,7 +468,7 @@ function detectLanguage() {
 
 function detectThemePreference() {
   const savedTheme = localStorage.getItem("bladeOfReadersTheme");
-  return ["auto", "light", "dark"].includes(savedTheme) ? savedTheme : "dark";
+  return ["auto", "light", "dark"].includes(savedTheme) ? savedTheme : "auto";
 }
 
 function isAutoDarkModeTime(date = new Date()) {
@@ -512,7 +512,7 @@ function updateThemeControl() {
 }
 
 function applyReaderTheme(preference = currentThemePreference, { save = true } = {}) {
-  currentThemePreference = ["auto", "light", "dark"].includes(preference) ? preference : "dark";
+  currentThemePreference = ["auto", "light", "dark"].includes(preference) ? preference : "auto";
   currentReaderTheme = resolveReaderTheme(currentThemePreference);
   document.documentElement.dataset.readerTheme = currentReaderTheme;
   document.documentElement.style.colorScheme = currentReaderTheme === "dark" ? "dark" : "light";

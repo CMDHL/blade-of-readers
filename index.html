@@ -9,7 +9,7 @@
       (() => {
         const key = "bladeOfReadersTheme";
         const saved = localStorage.getItem(key);
-        const preference = ["auto", "light", "dark"].includes(saved) ? saved : "dark";
+        const preference = ["auto", "light", "dark"].includes(saved) ? saved : "auto";
         const hour = new Date().getHours();
         const night = hour >= 19 || hour < 7;
         const systemDark = window.matchMedia?.("(prefers-color-scheme: dark)")?.matches;

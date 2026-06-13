@@ -115,7 +115,7 @@ input {
   position: fixed;
   top: 10px;
   right: var(--shell-inline-padding);
-  z-index: 30;
+  z-index: 1000;
   min-width: 78px;
   min-height: 34px;
   padding: 0 10px;
