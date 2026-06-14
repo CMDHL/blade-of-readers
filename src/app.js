@@ -33,6 +33,7 @@ const dropZone = document.querySelector("#dropZone");
 const loadingOverlay = document.querySelector("#loadingOverlay");
 const statusText = document.querySelector("#statusText");
 const pageText = document.querySelector("#pageText");
+const readingTimerText = document.querySelector("#readingTimerText");
 const messageDialog = document.querySelector("#messageDialog");
 const messageDialogText = document.querySelector("#messageDialogText");
 const quizPrompt = document.querySelector("#quizPrompt");
@@ -53,6 +54,7 @@ const punctuationPattern = /[\s.,;:!?()[\]{}"'`~@#$%^&*_+=<>/\\|，。？！、�
 const textSegmentPattern = /[\s.,;:!?()[\]{}"'`~@#$%^&*_+=<>/\\|，。？！、；：（）【】《》“”‘’—…·「」『』]+|[^\s.,;:!?()[\]{}"'`~@#$%^&*_+=<>/\\|，。？！、；：（）【】《》“”‘’—…·「」『』]+/gu;
 const textMeasureContext = document.createElement("canvas").getContext("2d");
 const SPAWN_ANNOTATION_COMMENT = "[spawn]";
+const TIME_ANNOTATION_PREFIX = "[time]";
 const QUIZ_ANNOTATION_PREFIX = "[quiz]";
 const QUIZ_DEFEAT_FADE_MS = 1400;
 const QUIZ_SPAWN_FADE_MS = 2000;
@@ -230,6 +232,9 @@ let currentReaderTheme = "dark";
 let themeAutoTimer = null;
 let currentStatus = { key: "waiting", values: {} };
 let currentPageText = { page: 1, total: null };
+let readingTimeBaseSeconds = 0;
+let readingTimeStartedAt = null;
+let readingTimeDisplayTimer = null;
 let currentPdfBytes = null;
 let currentPdfName = "document.pdf";
 let currentPdfFileHandle = null;
@@ -360,6 +365,8 @@ const translations = {
     savingPdf: "Saving PDF...",
     pdfSaved: "PDF saved.",
     pdfSavedAt: "PDF saved at {time}.",
+    readingTimeValue: "Time {time}",
+    readingTimeLabel: "Reading time",
     saveCancelled: "Save cancelled.",
     annotatedPdfReady: "PDF exported.",
     pdfWriteError: "Could not write annotations into that PDF.",
@@ -462,6 +469,8 @@ const translations = {
     savingPdf: "正在保存 PDF...",
     pdfSaved: "已保存 PDF。",
     pdfSavedAt: "已保存 PDF · {time}",
+    readingTimeValue: "时间 {time}",
+    readingTimeLabel: "阅读时间",
     saveCancelled: "已取消保存。",
     annotatedPdfReady: "已导出 PDF。",
     pdfWriteError: "无法把批注写入这个 PDF。",
@@ -602,6 +611,94 @@ function updatePageText(page = currentPageText.page, total = currentPageText.tot
   pageText.textContent = total ? t("pageOf", { page, total }) : t("page", { page });
 }
 
+function formatReadingDuration(totalSeconds) {
+  const safeSeconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const seconds = safeSeconds % 60;
+  return [hours, minutes, seconds].map((value) => String(value).padStart(2, "0")).join(":");
+}
+
+function parseReadingDuration(value) {
+  const match = String(value || "").trim().match(/^(\d+):(\d{1,2}):(\d{1,2})$/u);
+  if (!match) return null;
+  const hours = Number.parseInt(match[1], 10);
+  const minutes = Number.parseInt(match[2], 10);
+  const seconds = Number.parseInt(match[3], 10);
+  if (minutes > 59 || seconds > 59) return null;
+  return (hours * 3600) + (minutes * 60) + seconds;
+}
+
+function parseTimeAnnotationComment(comment) {
+  const text = String(comment || "").trim();
+  if (!text.startsWith(TIME_ANNOTATION_PREFIX)) return null;
+  const seconds = parseReadingDuration(text.slice(TIME_ANNOTATION_PREFIX.length));
+  return Number.isFinite(seconds) ? { seconds } : null;
+}
+
+function isTimeAnnotationComment(comment) {
+  return Boolean(parseTimeAnnotationComment(comment));
+}
+
+function isReadingTimerActive() {
+  return world.loaded && Boolean(currentPdfBytes) && document.visibilityState === "visible";
+}
+
+function getCurrentReadingTimeSeconds() {
+  if (readingTimeStartedAt == null) return Math.floor(readingTimeBaseSeconds);
+  return Math.floor(readingTimeBaseSeconds + ((Date.now() - readingTimeStartedAt) / 1000));
+}
+
+function updateReadingTimerDisplay() {
+  if (!readingTimerText) return;
+  const formatted = formatReadingDuration(getCurrentReadingTimeSeconds());
+  const value = t("readingTimeValue", { time: formatted });
+  const label = t("readingTimeLabel");
+  readingTimerText.textContent = value === "readingTimeValue" ? `Time ${formatted}` : value;
+  const safeLabel = label === "readingTimeLabel" ? "Reading time" : label;
+  readingTimerText.setAttribute("aria-label", safeLabel);
+  readingTimerText.title = safeLabel;
+}
+
+function startReadingTimer() {
+  if (readingTimeStartedAt == null && isReadingTimerActive()) {
+    readingTimeStartedAt = Date.now();
+  }
+  if (!readingTimeDisplayTimer) {
+    readingTimeDisplayTimer = window.setInterval(updateReadingTimerDisplay, 1000);
+  }
+  updateReadingTimerDisplay();
+}
+
+function stopReadingTimer() {
+  if (readingTimeStartedAt != null) {
+    readingTimeBaseSeconds = getCurrentReadingTimeSeconds();
+    readingTimeStartedAt = null;
+  }
+  updateReadingTimerDisplay();
+}
+
+function syncReadingTimerWithVisibility() {
+  if (isReadingTimerActive()) startReadingTimer();
+  else stopReadingTimer();
+}
+
+function resetReadingTimer(seconds = 0) {
+  readingTimeBaseSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+  readingTimeStartedAt = null;
+  updateReadingTimerDisplay();
+  syncReadingTimerWithVisibility();
+}
+
+function setLoadedReadingTimeSeconds(seconds) {
+  readingTimeBaseSeconds = Math.max(readingTimeBaseSeconds, Math.floor(Number(seconds) || 0));
+  updateReadingTimerDisplay();
+}
+
+function readingTimeAnnotationComment() {
+  return `${TIME_ANNOTATION_PREFIX}${formatReadingDuration(getCurrentReadingTimeSeconds())}`;
+}
+
 function updateCollisionButtonLabel() {
   collisionButton.textContent = collisionsVisible ? t("hideCollisions") : t("showCollisions");
 }
@@ -734,6 +831,7 @@ function applyLanguage(language) {
 
   statusText.textContent = t(currentStatus.key, currentStatus.values);
   updatePageText();
+  updateReadingTimerDisplay();
   updateCollisionButtonLabel();
   updateMessageAnnotationsButtonLabel();
   updateQuizPauseButtonLabel();
@@ -1552,7 +1650,7 @@ function isQuizAnnotation(annotation) {
 }
 
 function isVisibleAnnotation(annotation) {
-  return !isSpawnAnnotation(annotation) && !isQuizAnnotation(annotation);
+  return !isSpawnAnnotation(annotation) && !isQuizAnnotation(annotation) && !isTimeAnnotationComment(annotation?.comment);
 }
 
 function visibleAnnotationEntries() {
@@ -2376,6 +2474,13 @@ function importPdfAnnotations() {
   for (const page of world.pages) {
     for (const annotation of page.annotations || []) {
       if (!isHighlightAnnotation(annotation)) continue;
+      const comment = annotationText(annotation.contentsObj) || annotationText(annotation.contents);
+      const time = parseTimeAnnotationComment(comment);
+      if (time) {
+        setLoadedReadingTimeSeconds(time.seconds);
+        continue;
+      }
+
       const pdfQuadPoints = flatQuadPoints(annotation.quadPoints);
       const rects = quadPointsToWorldRects(page, pdfQuadPoints);
       const fallbackRect = pdfRectToWorldRect(page, annotation.rect);
@@ -2383,7 +2488,6 @@ function importPdfAnnotations() {
       if (!rects.length) continue;
       const matchedPlatforms = platformsFromAnnotationRects(rects);
       const range = readingIndexRange(matchedPlatforms);
-      const comment = annotationText(annotation.contentsObj) || annotationText(annotation.contents);
       const message = parseMessageAnnotationComment(comment);
       const quiz = parseQuizAnnotationComment(comment);
       const importedAnnotation = {
@@ -2513,6 +2617,12 @@ function isPdfSpawnAnnotationDict(annot) {
   return isSpawnAnnotationComment(comment);
 }
 
+function isPdfTimeAnnotationDict(annot) {
+  if (!isPdfHighlightDict(annot)) return false;
+  const comment = pdfObjectText(annot.lookup?.(PDFName.of("Contents")));
+  return isTimeAnnotationComment(comment);
+}
+
 function pdfAnnotationMatchesMetadata(annot, metadata) {
   const nm = pdfObjectText(annot.lookup?.(PDFName.of("NM")));
   if (metadata.id && nm && metadata.id === nm) return true;
@@ -2595,6 +2705,19 @@ function removePdfSpawnAnnotations(pdfDoc) {
       const annotRef = annots.get(index);
       const annot = lookupPdfAnnotation(pdfDoc, annotRef);
       if (isPdfSpawnAnnotationDict(annot)) annots.remove(index);
+    }
+  });
+}
+
+function removePdfTimeAnnotations(pdfDoc) {
+  pdfDoc.getPages().forEach((page) => {
+    const annots = page.node.lookupMaybe?.(PDFName.of("Annots"), PDFArray);
+    if (!annots) return;
+
+    for (let index = annots.size() - 1; index >= 0; index -= 1) {
+      const annotRef = annots.get(index);
+      const annot = lookupPdfAnnotation(pdfDoc, annotRef);
+      if (isPdfTimeAnnotationDict(annot)) annots.remove(index);
     }
   });
 }
@@ -2732,6 +2855,57 @@ function addPdfSpawnAnnotation(pdfDoc, pdfPages, platform) {
   }
 }
 
+function firstReadablePlatform() {
+  return world.platformsByReadingIndex.find((platform) => platform && Number.isFinite(platform.readingIndex))
+    || world.platforms.find((platform) => platform && Number.isInteger(platform.page));
+}
+
+function addPdfTimeAnnotation(pdfDoc, pdfPages) {
+  const platform = firstReadablePlatform();
+  if (!platform) return;
+  const rectsByPage = new Map();
+  for (const rect of rectsForLineGroups(lineGroupsForPlatforms([platform]))) {
+    if (!isWritableAnnotationRect(rect)) continue;
+    if (!rectsByPage.has(rect.page)) rectsByPage.set(rect.page, []);
+    rectsByPage.get(rect.page).push(rect);
+  }
+
+  for (const [pageNumber, rects] of rectsByPage) {
+    const pageInfo = world.pages[pageNumber - 1];
+    const pdfPage = pdfPages[pageNumber - 1];
+    if (!pageInfo || !pdfPage) continue;
+
+    const quads = rects
+      .map((rect) => worldRectToPdfQuad(pageInfo, rect))
+      .filter(isWritablePdfQuad);
+    if (!quads.length) continue;
+
+    const annotationRect = [
+      Math.min(...quads.map((quad) => quad.rect[0])),
+      Math.min(...quads.map((quad) => quad.rect[1])),
+      Math.max(...quads.map((quad) => quad.rect[2])),
+      Math.max(...quads.map((quad) => quad.rect[3])),
+    ];
+    const now = pdfDateString();
+    const dict = pdfDoc.context.obj({
+      Type: PDFName.of("Annot"),
+      Subtype: PDFName.of("Highlight"),
+      Rect: pdfNumberArray(pdfDoc, annotationRect),
+      QuadPoints: pdfNumberArray(pdfDoc, quads.flatMap((quad) => quad.quadPoints)),
+      C: pdfNumberArray(pdfDoc, [1, 1, 1]),
+      CA: PDFNumber.of(0),
+      F: PDFNumber.of(4),
+      T: PDFString.of("Blade of Readers"),
+      M: PDFString.of(now),
+      NM: PDFString.of(`BladeOfReaders-time-${pageNumber}`),
+      Subj: PDFString.of("Reading Time"),
+      Contents: PDFHexString.fromText(readingTimeAnnotationComment()),
+    });
+    pageAnnotationArray(pdfDoc, pdfPage).push(pdfDoc.context.register(dict));
+    return;
+  }
+}
+
 function annotationDownloadName() {
   const name = currentPdfName.trim() || "document.pdf";
   return /\.pdf$/iu.test(name) ? name : `${name}.pdf`;
@@ -2794,11 +2968,13 @@ async function annotatedPdfBytes(spawnPlatform = currentStandingPlatform()) {
   ));
   const hasPdfAnnotationRemovals = world.removedPdfAnnotations.length > 0;
   const hasMessageAnnotationUpdates = world.messageAnnotations.some(messageVoteChanged);
+  const hasReadingTimeUpdate = world.loaded && Boolean(firstReadablePlatform());
   if (
     !sessionAnnotations.length
     && !hasPdfAnnotationRemovals
     && !hasMessageAnnotationUpdates
     && !hasSpawnAnnotationUpdate
+    && !hasReadingTimeUpdate
   ) {
     return new Uint8Array(currentPdfBytes.slice(0));
   }
@@ -2812,6 +2988,7 @@ async function annotatedPdfBytes(spawnPlatform = currentStandingPlatform()) {
   removePdfAnnotations(pdfDoc);
   removePdfAnnotationsByIds(pdfDoc, sessionAnnotationPdfIds(sessionAnnotations));
   if (spawnPlatform) removePdfSpawnAnnotations(pdfDoc);
+  removePdfTimeAnnotations(pdfDoc);
   updatePdfMessageAnnotations(pdfDoc);
 
   for (const annotation of sessionAnnotations) {
@@ -2848,6 +3025,7 @@ async function annotatedPdfBytes(spawnPlatform = currentStandingPlatform()) {
   }
 
   if (spawnPlatform) addPdfSpawnAnnotation(pdfDoc, pdfPages, spawnPlatform);
+  addPdfTimeAnnotation(pdfDoc, pdfPages);
 
   return pdfDoc.save();
 }
@@ -3232,6 +3410,7 @@ function resetAfterPdfLoadError() {
   world.quizAnnotations = [];
   world.removedPdfAnnotations = [];
   world.spawnPlatformReadingIndex = null;
+  resetReadingTimer(0);
   nextAnnotationOrder = 0;
   annotationMenuMode = false;
   selectedAnnotationIndex = 0;
@@ -3266,6 +3445,7 @@ async function loadPdf(source, loadVersion = nextPdfLoadVersion()) {
   world.quizAnnotations = [];
   world.removedPdfAnnotations = [];
   world.spawnPlatformReadingIndex = null;
+  resetReadingTimer(0);
   nextAnnotationOrder = 0;
   annotationMenuMode = false;
   selectedAnnotationIndex = 0;
@@ -3410,6 +3590,7 @@ async function loadPdf(source, loadVersion = nextPdfLoadVersion()) {
   });
   updateAnnotationControls();
   autoCenterPlayer();
+  syncReadingTimerWithVisibility();
   return true;
 }
 
@@ -4697,6 +4878,7 @@ async function saveAnnotatedPdf() {
     await writePdfBytesToHandle(currentPdfFileHandle, bytes);
     currentPdfName = currentPdfFileHandle.name || currentPdfName;
     currentPdfBytes = bytes.slice(0);
+    resetReadingTimer(getCurrentReadingTimeSeconds());
     setStatus("pdfSavedAt", { time: formatStatusTimestamp() });
     triggerSaveSuccessFeedback();
     updateAnnotationControls();
@@ -4987,6 +5169,7 @@ window.addEventListener("resize", () => {
 window.addEventListener("focus", () => applyReaderTheme(currentThemePreference, { save: false }));
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) applyReaderTheme(currentThemePreference, { save: false });
+  syncReadingTimerWithVisibility();
 });
 
 window.addEventListener("wheel", markManualScrollIntent, { passive: true });
@@ -5024,6 +5207,7 @@ if (window.visualViewport) {
 applyReaderTheme(detectThemePreference(), { save: false });
 applyLanguage(detectLanguage());
 applyPdfViewScale();
+updateReadingTimerDisplay();
 updateResponsiveUiState();
 loadTutorialPdfForLanguage(currentLanguage);
 if (window.ResizeObserver && topbar) {

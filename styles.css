@@ -854,6 +854,10 @@ html[data-reader-theme="dark"] .pdf-message-platform-highlight {
   background: rgba(158, 230, 163, 0.3);
 }
 
+html[data-reader-theme="dark"] .pdf-annotation-highlight.has-comment {
+  background: rgba(85, 183, 169, 0.32);
+  outline: 1px solid rgba(110, 210, 197, 0.62);
+}
 
 .pdf-annotation-highlight.has-comment {
   background: rgba(25, 118, 111, 0.3);
@@ -1557,9 +1561,16 @@ body.is-mobile-device .annotation-sidebar {
   white-space: nowrap;
 }
 
-#pageText {
+#pageText,
+.reading-timer {
   flex: 0 0 auto;
   white-space: nowrap;
+}
+
+.reading-timer {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
 }
 
 @media (max-width: 720px) {
