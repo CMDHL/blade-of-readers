@@ -9,11 +9,11 @@
       (() => {
         const key = "bladeOfReadersTheme";
         const saved = localStorage.getItem(key);
-        const preference = ["auto", "light", "dark"].includes(saved) ? saved : "auto";
+        const systemTheme = window.matchMedia?.("(prefers-color-scheme: dark)")?.matches ? "dark" : "light";
+        const preference = ["auto", "light", "dark"].includes(saved) ? saved : systemTheme;
         const hour = new Date().getHours();
         const night = hour >= 19 || hour < 7;
-        const systemDark = window.matchMedia?.("(prefers-color-scheme: dark)")?.matches;
-        const theme = preference === "auto" ? (night || systemDark ? "dark" : "light") : preference;
+        const theme = preference === "auto" ? (night ? "dark" : "light") : preference;
         document.documentElement.dataset.readerTheme = theme;
         document.documentElement.style.colorScheme = theme;
       })();
@@ -154,7 +154,7 @@
             </div>
             <div class="control-row">
               <span data-i18n="annotationActions">Actions</span>
-              <span class="fixed-control" data-i18n="radialControl">LB + right stick</span>
+              <span class="fixed-control" data-i18n="radialControl">LT + right stick</span>
             </div>
             <div class="control-row">
               <span data-i18n="menu">Menu</span>
@@ -194,7 +194,7 @@
       </div>
 
       <div id="annotationRadial" class="annotation-radial is-hidden" aria-hidden="true">
-        <div class="annotation-radial-center">LB</div>
+        <div class="annotation-radial-center">LT</div>
         <div class="annotation-radial-option option-copy" data-radial-choice="copySelection" data-i18n="copySelection">Copy</div>
         <div class="annotation-radial-option option-highlight" data-radial-choice="highlightSelection" data-i18n="highlightSelection">Highlight</div>
         <div class="annotation-radial-option option-comment" data-radial-choice="commentSelection" data-i18n="commentSelection">Comment</div>

@@ -94,7 +94,7 @@ const keyMap = {
 const controllerMap = {
   jump: [0],
   attack: [2],
-  parry: [5],
+  parry: [4],
   dash: [7],
   interact: [1],
   menu: [8],
@@ -314,7 +314,7 @@ const translations = {
     menu: "Menu",
     view: "View",
     annotationActions: "Actions",
-    radialControl: "LB + right stick",
+    radialControl: "LT + right stick",
     rightStick: "Right stick",
     annotationsLabel: "Annotations",
     gameMode: "Game",
@@ -416,7 +416,7 @@ const translations = {
     menu: "菜单",
     view: "视图",
     annotationActions: "操作",
-    radialControl: "LB + 右摇杆",
+    radialControl: "LT + 右摇杆",
     rightStick: "右摇杆",
     annotationsLabel: "批注",
     gameMode: "游戏",
@@ -481,9 +481,17 @@ function detectLanguage() {
 }
 
 
+function detectSystemReaderTheme() {
+  return window.matchMedia?.("(prefers-color-scheme: dark)")?.matches ? "dark" : "light";
+}
+
 function detectThemePreference() {
   const savedTheme = localStorage.getItem("bladeOfReadersTheme");
-  return ["auto", "light", "dark"].includes(savedTheme) ? savedTheme : "auto";
+  if (["auto", "light", "dark"].includes(savedTheme)) return savedTheme;
+
+  // First visit/default follows the OS once, then becomes a normal fixed Light/Dark choice.
+  // Auto remains a separate local-time-only mode.
+  return detectSystemReaderTheme();
 }
 
 function isAutoDarkModeTime(date = new Date()) {
@@ -494,12 +502,8 @@ function isAutoDarkModeTime(date = new Date()) {
 function resolveReaderTheme(preference = currentThemePreference) {
   if (preference === "light" || preference === "dark") return preference;
 
-  // Auto follows local device time. Also respect the OS dark preference when it is set,
-  // because that is another strong signal that the user wants low-light UI.
-  const systemPrefersDark = Boolean(
-    window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches,
-  );
-  return (isAutoDarkModeTime() || systemPrefersDark) ? "dark" : "light";
+  // Auto follows local device time only: light from 07:00 to 18:59, dark from 19:00 to 06:59.
+  return isAutoDarkModeTime() ? "dark" : "light";
 }
 
 function scheduleThemeAutoRefresh() {
@@ -4502,7 +4506,7 @@ function updateControllerInput() {
     const interactWasPressed = controllerMap.interact.some((button) => previousControllerButtons.has(button));
     const menuPressed = controllerMap.menu.some((button) => controllerButtons.has(button));
     const menuWasPressed = controllerMap.menu.some((button) => previousControllerButtons.has(button));
-    const leftBumperPressed = controllerButtons.has(4);
+    const radialModifierPressed = controllerButtons.has(6);
 
     if (activeMessageAnnotationId) {
       if (controllerDirections.left && !previousControllerDirections.left) handleMessageDialogKey(keyMap.left[0]);
@@ -4534,8 +4538,8 @@ function updateControllerInput() {
       return;
     }
 
-    if (leftBumperPressed || annotationRadialActive) {
-      if (leftBumperPressed) {
+    if (radialModifierPressed || annotationRadialActive) {
+      if (radialModifierPressed) {
         annotationRadialActive = true;
         annotationRadialChoice = radialChoiceFromRightStick(rightStickX, rightStickY);
         renderAnnotationRadial();
@@ -4984,8 +4988,6 @@ window.addEventListener("focus", () => applyReaderTheme(currentThemePreference, 
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) applyReaderTheme(currentThemePreference, { save: false });
 });
-window.matchMedia?.("(prefers-color-scheme: dark)")
-  ?.addEventListener?.("change", () => applyReaderTheme(currentThemePreference, { save: false }));
 
 window.addEventListener("wheel", markManualScrollIntent, { passive: true });
 window.addEventListener("touchmove", markManualScrollIntent, { passive: true });
