@@ -56,6 +56,7 @@ const textMeasureContext = document.createElement("canvas").getContext("2d");
 const SPAWN_ANNOTATION_COMMENT = "[spawn]";
 const TIME_ANNOTATION_PREFIX = "[time]";
 const QUIZ_ANNOTATION_PREFIX = "[quiz]";
+const QUIZ_DONE_TAG = "[done]";
 const QUIZ_DEFEAT_FADE_MS = 1400;
 const QUIZ_SPAWN_FADE_MS = 2000;
 const PDF_VIEW_SCALE_MIN = 1;
@@ -1640,9 +1641,24 @@ function isSpawnAnnotation(annotation) {
 function parseQuizAnnotationComment(comment) {
   const text = String(comment || "");
   if (!text.startsWith(QUIZ_ANNOTATION_PREFIX)) return null;
+
+  let rest = text.slice(QUIZ_ANNOTATION_PREFIX.length).trimStart();
+  const done = rest.startsWith(QUIZ_DONE_TAG);
+  if (done) rest = rest.slice(QUIZ_DONE_TAG.length).trimStart();
+
   return {
-    prompt: text.slice(QUIZ_ANNOTATION_PREFIX.length).trim(),
+    prompt: rest.trim(),
+    done,
   };
+}
+
+function formatQuizAnnotationComment(annotation) {
+  const doneTag = annotation?.quizDone ? QUIZ_DONE_TAG : "";
+  return `${QUIZ_ANNOTATION_PREFIX}${doneTag}${annotation?.quizPrompt || ""}`;
+}
+
+function quizCompletionChanged(annotation) {
+  return Boolean(annotation?.quizDone) !== Boolean(annotation?.quizOriginalDone);
 }
 
 function isQuizAnnotation(annotation) {
@@ -1887,14 +1903,18 @@ function createAnnotationId() {
 }
 
 function quizAnnotationFromBase(annotation, quiz) {
-  return {
+  const quizAnnotation = {
     ...annotation,
     type: "quiz",
     quizPrompt: quiz.prompt,
-    quizState: "pending",
+    quizDone: Boolean(quiz.done),
+    quizOriginalDone: Boolean(quiz.done),
+    quizState: quiz.done ? "defeated" : "pending",
     quizDefeatStartedAt: 0,
     quizFadeCompleteAt: 0,
   };
+  quizAnnotation.comment = formatQuizAnnotationComment(quizAnnotation);
+  return quizAnnotation;
 }
 
 function addAnnotationFromSelection(comment = "") {
@@ -2758,6 +2778,44 @@ function updatePdfMessageAnnotations(pdfDoc) {
   });
 }
 
+function updatePdfQuizAnnotations(pdfDoc) {
+  const changedQuizzes = world.quizAnnotations.filter((quiz) => (
+    quiz.source === "pdf" && quizCompletionChanged(quiz)
+  ));
+  if (!changedQuizzes.length) return;
+
+  const quizzesByPage = new Map();
+  for (const annotation of changedQuizzes) {
+    const page = annotation.pdfPage || annotationFirstPage(annotation);
+    if (!quizzesByPage.has(page)) quizzesByPage.set(page, []);
+    quizzesByPage.get(page).push(annotation);
+  }
+
+  pdfDoc.getPages().forEach((page, pageIndex) => {
+    const quizzes = quizzesByPage.get(pageIndex + 1);
+    if (!quizzes?.length) return;
+
+    const annots = page.node.lookupMaybe?.(PDFName.of("Annots"), PDFArray);
+    if (!annots) return;
+
+    for (let index = 0; index < annots.size(); index += 1) {
+      const annotRef = annots.get(index);
+      const annot = lookupPdfAnnotation(pdfDoc, annotRef);
+      if (!isPdfHighlightDict(annot)) continue;
+
+      const quiz = quizzes.find((annotation) => pdfAnnotationMatchesMetadata(annot, {
+        id: annotation.pdfId || annotation.id || "",
+        rect: annotation.pdfRect || [],
+        quadPoints: annotation.pdfQuadPoints || [],
+      }));
+      if (!quiz) continue;
+
+      annot.set(PDFName.of("Contents"), PDFHexString.fromText(formatQuizAnnotationComment(quiz)));
+      annot.set(PDFName.of("M"), PDFString.of(pdfDateString()));
+    }
+  });
+}
+
 function worldRectToPdfQuad(page, rect) {
   const left = rect.x - page.x;
   const top = rect.y - page.y;
@@ -2923,6 +2981,15 @@ function downloadBytes(bytes, name) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function markSavedAnnotationStateAsOriginal() {
+  for (const message of world.messageAnnotations) {
+    message.messageOriginalChoice = message.messageChoice;
+  }
+  for (const quiz of world.quizAnnotations) {
+    quiz.quizOriginalDone = Boolean(quiz.quizDone);
+  }
+}
+
 function localFileAccessSupported() {
   return typeof window.showOpenFilePicker === "function"
     && typeof window.showSaveFilePicker === "function";
@@ -2968,11 +3035,13 @@ async function annotatedPdfBytes(spawnPlatform = currentStandingPlatform()) {
   ));
   const hasPdfAnnotationRemovals = world.removedPdfAnnotations.length > 0;
   const hasMessageAnnotationUpdates = world.messageAnnotations.some(messageVoteChanged);
+  const hasQuizAnnotationUpdates = world.quizAnnotations.some(quizCompletionChanged);
   const hasReadingTimeUpdate = world.loaded && Boolean(firstReadablePlatform());
   if (
     !sessionAnnotations.length
     && !hasPdfAnnotationRemovals
     && !hasMessageAnnotationUpdates
+    && !hasQuizAnnotationUpdates
     && !hasSpawnAnnotationUpdate
     && !hasReadingTimeUpdate
   ) {
@@ -2990,6 +3059,7 @@ async function annotatedPdfBytes(spawnPlatform = currentStandingPlatform()) {
   if (spawnPlatform) removePdfSpawnAnnotations(pdfDoc);
   removePdfTimeAnnotations(pdfDoc);
   updatePdfMessageAnnotations(pdfDoc);
+  updatePdfQuizAnnotations(pdfDoc);
 
   for (const annotation of sessionAnnotations) {
     const rectsByPage = new Map();
@@ -3906,6 +3976,8 @@ function quizAnswerOverlapsSelection(quiz) {
 function defeatQuizEnemy(quiz, enemy, now) {
   if (quiz.quizState !== "pending") return;
   quiz.quizState = "defeating";
+  quiz.quizDone = true;
+  quiz.comment = formatQuizAnnotationComment(quiz);
   quiz.quizDefeatStartedAt = now;
   quiz.quizFadeCompleteAt = now + QUIZ_DEFEAT_FADE_MS;
   enemy.element.classList.add("is-defeating");
@@ -3918,6 +3990,8 @@ function finishQuizDefeatFades(now) {
   for (const quiz of world.quizAnnotations) {
     if (quiz.quizState !== "defeating" || now < quiz.quizFadeCompleteAt) continue;
     quiz.quizState = "defeated";
+    quiz.quizDone = true;
+    quiz.comment = formatQuizAnnotationComment(quiz);
     if (activeQuizEnemy?.quizId === quiz.id) removeActiveQuizEnemy();
     changed = true;
   }
@@ -3976,6 +4050,8 @@ function updateQuizEnemy(quiz, enemy, now) {
 function resetQuizState() {
   for (const quiz of world.quizAnnotations) {
     quiz.quizState = "pending";
+    quiz.quizDone = false;
+    quiz.comment = formatQuizAnnotationComment(quiz);
     quiz.quizDefeatStartedAt = 0;
     quiz.quizFadeCompleteAt = 0;
   }
@@ -4878,6 +4954,7 @@ async function saveAnnotatedPdf() {
     await writePdfBytesToHandle(currentPdfFileHandle, bytes);
     currentPdfName = currentPdfFileHandle.name || currentPdfName;
     currentPdfBytes = bytes.slice(0);
+    markSavedAnnotationStateAsOriginal();
     resetReadingTimer(getCurrentReadingTimeSeconds());
     setStatus("pdfSavedAt", { time: formatStatusTimestamp() });
     triggerSaveSuccessFeedback();
