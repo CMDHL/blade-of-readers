@@ -1105,6 +1105,7 @@ function resetPlayer() {
   player.dropThrough = false;
   player.coyote = 0;
   player.dashFrames = 0;
+  player.dashDirection = 1;
   player.dashCooldown = 0;
   player.facingDirection = 1;
   clearBladeSwing();
@@ -4139,7 +4140,7 @@ function startDash() {
     ? -1
     : actionPressed("right") && !actionPressed("left")
       ? 1
-      : player.dashDirection || 1;
+      : player.facingDirection || player.dashDirection || 1;
   player.dashDirection = direction;
   player.facingDirection = direction;
   player.dashFrames = config.dashDuration;
@@ -4342,8 +4343,14 @@ function updatePlayer() {
   const movingRight = !parryActive && actionPressed("right");
   const isDashing = player.dashFrames > 0;
 
-  if (movingLeft && !movingRight) player.facingDirection = -1;
-  if (movingRight && !movingLeft) player.facingDirection = 1;
+  if (movingLeft && !movingRight) {
+    player.facingDirection = -1;
+    player.dashDirection = -1;
+  }
+  if (movingRight && !movingLeft) {
+    player.facingDirection = 1;
+    player.dashDirection = 1;
+  }
 
   if (isDashing) {
     player.vx = player.dashDirection * config.dashSpeed;
