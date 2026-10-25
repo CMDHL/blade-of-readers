@@ -92,6 +92,7 @@ const keyMap = {
   copySelection: ["Digit1"],
   highlightSelection: ["Digit2"],
   commentSelection: ["Digit3"],
+  menu: ["Tab"],
 };
 
 const controllerMap = {
@@ -2105,6 +2106,7 @@ function setAnnotationMenuMode(isActive) {
   clampSelectedAnnotationIndex();
   updateAnnotationControls();
   renderAnnotationSidebar();
+  if (!annotationMenuMode) syncSelectedAnnotationFromPlayer();
   updateResponsiveUiState();
   setStatus(annotationMenuMode ? "menuModeOn" : "menuModeOff");
   if (world.loaded && (!annotationMenuMode || getComputedStyle(readerStage).display !== "none")) {
@@ -3467,6 +3469,7 @@ function tutorialPdfSource(language = currentLanguage) {
 function resetAfterPdfLoadError() {
   setLoadingPdf(false);
   world.loaded = false;
+  annotationSidebar.classList.remove("is-over-annotation");
   world.pages = [];
   world.platforms = [];
   world.platformsByPage = new Map();
@@ -3507,6 +3510,7 @@ function resetAfterPdfLoadError() {
 
 async function loadPdf(source, loadVersion = nextPdfLoadVersion()) {
   world.loaded = false;
+  annotationSidebar.classList.remove("is-over-annotation");
   playerSprite.hidden = true;
   dropZone.classList.add("is-hidden");
   currentPdfBytes = null;
@@ -4272,21 +4276,26 @@ function annotationDistanceToPlayerLocation(annotation, platforms) {
 }
 
 function syncSelectedAnnotationFromPlayer() {
-  if (annotationMenuMode || !visibleAnnotationEntries().length) return;
-  const platforms = supportedTextPlatforms();
-  if (!platforms.length) return;
+  if (annotationMenuMode) return;
+  const entries = visibleAnnotationEntries();
+  const platforms = world.loaded && entries.length ? supportedTextPlatforms() : [];
 
-  sortAnnotationsByStart(world.annotations[selectedAnnotationIndex]?.id || null);
+  if (platforms.length) {
+    sortAnnotationsByStart(world.annotations[selectedAnnotationIndex]?.id || null);
+  }
   let best = null;
-  visibleAnnotationEntries().forEach(({ annotation, index }) => {
-    const matchedPlatforms = platforms.filter((platform) => annotationIncludesPlatform(annotation, platform));
-    if (!matchedPlatforms.length) return;
-    const distance = annotationDistanceToPlayerLocation(annotation, matchedPlatforms);
-    if (!best || distance < best.distance || (distance === best.distance && index < best.index)) {
-      best = { index, distance };
-    }
-  });
+  if (platforms.length) {
+    visibleAnnotationEntries().forEach(({ annotation, index }) => {
+      const matchedPlatforms = platforms.filter((platform) => annotationIncludesPlatform(annotation, platform));
+      if (!matchedPlatforms.length) return;
+      const distance = annotationDistanceToPlayerLocation(annotation, matchedPlatforms);
+      if (!best || distance < best.distance || (distance === best.distance && index < best.index)) {
+        best = { index, distance };
+      }
+    });
+  }
 
+  annotationSidebar.classList.toggle("is-over-annotation", Boolean(best));
   if (!best) return;
   if (selectedAnnotationIndex !== best.index) {
     selectedAnnotationIndex = best.index;
@@ -5200,6 +5209,12 @@ window.addEventListener("keydown", (event) => {
 
   if (activeMessageAnnotationId) {
     if (!wasPressed) handleMessageDialogKey(event.code);
+    keys.add(event.code);
+    return;
+  }
+
+  if (!wasPressed && keyMap.menu.includes(event.code)) {
+    toggleAnnotationMenuMode();
     keys.add(event.code);
     return;
   }

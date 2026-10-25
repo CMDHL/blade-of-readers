@@ -584,13 +584,18 @@ html[data-reader-theme="dark"] .annotation-sidebar.is-menu-mode #annotationModeL
   width: min(320px, calc(100vw - (var(--shell-inline-padding) * 2)));
   max-height: calc(100vh - var(--sticky-topbar-height) - var(--sticky-sidebar-gap) - var(--statusbar-offset));
   min-height: 220px;
-  display: flex;
+  display: none;
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.86);
   box-shadow: 0 10px 30px rgba(26, 31, 44, 0.08);
+}
+
+.annotation-sidebar.is-menu-mode,
+.annotation-sidebar.is-over-annotation {
+  display: flex;
 }
 
 .annotation-sidebar-header {
@@ -1302,7 +1307,7 @@ body.is-mobile-device .statusbar {
   transform: none;
 }
 
-body.is-mobile-device:not(.is-annotation-menu-mode) .annotation-sidebar,
+body.is-mobile-device:not(.is-annotation-menu-mode) .annotation-sidebar:not(.is-over-annotation),
 body.is-mobile-device.is-annotation-menu-mode .reader-stage {
   display: none;
 }
