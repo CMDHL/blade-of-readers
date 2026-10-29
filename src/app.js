@@ -240,6 +240,8 @@ let readingTimeDisplayTimer = null;
 let currentPdfBytes = null;
 let currentPdfName = "document.pdf";
 let currentPdfFileHandle = null;
+let annotationAutoSaveTimer = null;
+let annotationSaveQueue = Promise.resolve();
 let pdfPageObserver = null;
 let pdfPageRenderQueue = [];
 let pdfPageRenderActiveCount = 0;
@@ -2185,6 +2187,7 @@ function deleteSelectedAnnotation() {
   renderAnnotationLayer();
   renderAnnotationSidebar();
   setStatus("annotationDeleted");
+  scheduleAnnotationAutoSave();
 }
 
 function messageHostPlatforms(annotation) {
@@ -2384,6 +2387,7 @@ async function performSelectionAction(action) {
     if (comment === null) return;
     if (!addAnnotationFromSelection(comment)) return;
     setStatus("commentAdded");
+    scheduleAnnotationAutoSave();
   }
 }
 
@@ -3509,6 +3513,8 @@ function resetAfterPdfLoadError() {
 }
 
 async function loadPdf(source, loadVersion = nextPdfLoadVersion()) {
+  window.clearTimeout(annotationAutoSaveTimer);
+  annotationAutoSaveTimer = null;
   world.loaded = false;
   annotationSidebar.classList.remove("is-over-annotation");
   playerSprite.hidden = true;
@@ -4874,6 +4880,13 @@ async function openLocalPdfWithHandle() {
       ...pdfPickerOptions(),
     });
     const file = await fileHandle.getFile();
+    // Acquire write permission while opening, so later automatic saves do not
+    // need to open a new permission prompt outside a user gesture.
+    try {
+      await verifyWritableFileHandle(fileHandle);
+    } catch (error) {
+      console.warn("Write permission is not yet granted; Save PDF can request it later.", error);
+    }
     const loadVersion = nextPdfLoadVersion();
     userPdfLoadVersion = loadVersion;
     userPdfLoadPending = true;
@@ -4952,11 +4965,34 @@ async function copySelectedText() {
   }
 }
 
-async function saveAnnotatedPdf() {
-  if (!currentPdfBytes || !currentPdfFileHandle) return;
+function scheduleAnnotationAutoSave() {
+  // Imports and the built-in tutorial do not have a writable local file handle.
+  if (!currentPdfFileHandle || !currentPdfBytes) return;
+  window.clearTimeout(annotationAutoSaveTimer);
+  annotationAutoSaveTimer = window.setTimeout(() => {
+    annotationAutoSaveTimer = null;
+    void saveAnnotatedPdf();
+  }, 350);
+}
+
+function saveAnnotatedPdf() {
+  // Serialize writes. An edit made during an earlier save queues a fresh write.
+  window.clearTimeout(annotationAutoSaveTimer);
+  annotationAutoSaveTimer = null;
+  const fileHandle = currentPdfFileHandle;
+  const loadVersion = pdfLoadVersion;
+  const job = annotationSaveQueue.then(() => saveAnnotatedPdfOnce(fileHandle, loadVersion));
+  annotationSaveQueue = job.catch((error) => console.error(error));
+  return job;
+}
+
+async function saveAnnotatedPdfOnce(fileHandle, loadVersion) {
+  if (!currentPdfBytes || !fileHandle || fileHandle !== currentPdfFileHandle || loadVersion !== pdfLoadVersion) return;
+  const isCurrentPdf = () => currentPdfFileHandle === fileHandle && pdfLoadVersion === loadVersion;
 
   try {
-    const hasPermission = await verifyWritableFileHandle(currentPdfFileHandle);
+    const hasPermission = await verifyWritableFileHandle(fileHandle);
+    if (!isCurrentPdf()) return;
     if (!hasPermission) {
       setStatus("saveCancelled");
       return;
@@ -4965,10 +5001,11 @@ async function saveAnnotatedPdf() {
     const spawnPlatform = updateSpawnAnnotationFromPlayer();
     setStatus("savingPdf");
     const bytes = await annotatedPdfBytes(spawnPlatform);
-    if (!bytes) return;
+    if (!bytes || !isCurrentPdf()) return;
 
-    await writePdfBytesToHandle(currentPdfFileHandle, bytes);
-    currentPdfName = currentPdfFileHandle.name || currentPdfName;
+    await writePdfBytesToHandle(fileHandle, bytes);
+    if (!isCurrentPdf()) return;
+    currentPdfName = fileHandle.name || currentPdfName;
     currentPdfBytes = bytes.slice(0);
     markSavedAnnotationStateAsOriginal();
     resetReadingTimer(getCurrentReadingTimeSeconds());
