@@ -56,7 +56,6 @@ const textMeasureContext = document.createElement("canvas").getContext("2d");
 const SPAWN_ANNOTATION_COMMENT = "[spawn]";
 const TIME_ANNOTATION_PREFIX = "[time]";
 const PDF_CONFIG_ANNOTATION_PREFIX = "[config]";
-const PDF_CHECKPOINT_INTERVAL_MS = 60_000;
 const QUIZ_ANNOTATION_PREFIX = "[quiz]";
 const QUIZ_DONE_TAG = "[done]";
 const QUIZ_DEFEAT_FADE_MS = 1400;
@@ -244,6 +243,7 @@ let currentPdfName = "document.pdf";
 let currentPdfFileHandle = null;
 let annotationAutoSaveTimer = null;
 let annotationSaveQueue = Promise.resolve();
+let backgroundSaveRequested = false;
 let pdfEditRevision = 0;
 let restoringPdfSettings = false;
 let pdfPageObserver = null;
@@ -753,7 +753,8 @@ function isTimeAnnotationComment(comment) {
 }
 
 function isReadingTimerActive() {
-  return world.loaded && Boolean(currentPdfBytes) && document.visibilityState === "visible";
+  return world.loaded && Boolean(currentPdfBytes)
+    && document.visibilityState === "visible" && document.hasFocus();
 }
 
 function getCurrentReadingTimeSeconds() {
@@ -3695,6 +3696,7 @@ function resetAfterPdfLoadError() {
 async function loadPdf(source, loadVersion = nextPdfLoadVersion()) {
   window.clearTimeout(annotationAutoSaveTimer);
   annotationAutoSaveTimer = null;
+  backgroundSaveRequested = false;
   pdfEditRevision = 0;
   world.loaded = false;
   annotationSidebar.classList.remove("is-over-annotation");
@@ -5510,11 +5512,30 @@ window.addEventListener("resize", () => {
   keepPlayerInVisibleWindow();
 });
 
-window.addEventListener("focus", () => applyReaderTheme(currentThemePreference, { save: false }));
+// Saving exactly during tab closure is not reliable: the browser may terminate
+// async File System Access writes. Start a checkpoint *before* that when the
+// window loses focus or the document becomes hidden. pagehide is best effort.
+function saveWhenLeavingGame() {
+  if (backgroundSaveRequested || !currentPdfFileHandle || !currentPdfBytes || !world.loaded) return;
+  backgroundSaveRequested = true; // blur + visibilitychange + pagehide may all fire.
+  void saveAnnotatedPdf(); // Includes the latest position, reading time, and edits.
+}
+
+window.addEventListener("focus", () => {
+  backgroundSaveRequested = false;
+  applyReaderTheme(currentThemePreference, { save: false });
+  syncReadingTimerWithVisibility();
+});
+window.addEventListener("blur", () => {
+  stopReadingTimer();
+  saveWhenLeavingGame();
+});
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) applyReaderTheme(currentThemePreference, { save: false });
   syncReadingTimerWithVisibility();
+  if (document.hidden) saveWhenLeavingGame();
 });
+window.addEventListener("pagehide", saveWhenLeavingGame);
 
 window.addEventListener("wheel", markManualScrollIntent, { passive: true });
 window.addEventListener("touchmove", markManualScrollIntent, { passive: true });
@@ -5547,15 +5568,6 @@ if (window.visualViewport) {
     markManualScrollIntent();
   });
 }
-
-// Checkpoint only while the player can actively view this window. The position
-// and reading time are also included in every action-triggered or manual save.
-window.setInterval(() => {
-  if (!currentPdfFileHandle || !currentPdfBytes || !world.loaded) return;
-  if (document.visibilityState !== "visible" || !document.hasFocus()) return;
-  if (annotationAutoSaveTimer) return; // A recent edit already has a pending save.
-  void saveAnnotatedPdf();
-}, PDF_CHECKPOINT_INTERVAL_MS);
 
 applyReaderTheme(detectThemePreference(), { save: false });
 applyLanguage(detectLanguage());
