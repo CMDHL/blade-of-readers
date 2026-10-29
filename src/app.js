@@ -787,6 +787,9 @@ function stopReadingTimer() {
   if (readingTimeStartedAt != null) {
     readingTimeBaseSeconds = getCurrentReadingTimeSeconds();
     readingTimeStartedAt = null;
+    // A real active-to-paused transition is the autosave trigger.
+    // No save is requested when the already-paused timer is checked again.
+    saveWhenLeavingGame();
   }
   updateReadingTimerDisplay();
 }
@@ -5512,12 +5515,13 @@ window.addEventListener("resize", () => {
   keepPlayerInVisibleWindow();
 });
 
-// Saving exactly during tab closure is not reliable: the browser may terminate
-// async File System Access writes. Start a checkpoint *before* that when the
-// window loses focus or the document becomes hidden. pagehide is best effort.
+// The reading timer pauses when the game loses focus or becomes hidden.
+// Its active-to-paused transition checkpoints progress; pagehide remains a
+// best-effort fallback if the browser closes the page without that transition.
+// Browsers do not guarantee completion of asynchronous writes during closure.
 function saveWhenLeavingGame() {
   if (backgroundSaveRequested || !currentPdfFileHandle || !currentPdfBytes || !world.loaded) return;
-  backgroundSaveRequested = true; // blur + visibilitychange + pagehide may all fire.
+  backgroundSaveRequested = true;
   void saveAnnotatedPdf(); // Includes the latest position, reading time, and edits.
 }
 
@@ -5526,14 +5530,10 @@ window.addEventListener("focus", () => {
   applyReaderTheme(currentThemePreference, { save: false });
   syncReadingTimerWithVisibility();
 });
-window.addEventListener("blur", () => {
-  stopReadingTimer();
-  saveWhenLeavingGame();
-});
+window.addEventListener("blur", stopReadingTimer);
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) applyReaderTheme(currentThemePreference, { save: false });
   syncReadingTimerWithVisibility();
-  if (document.hidden) saveWhenLeavingGame();
 });
 window.addEventListener("pagehide", saveWhenLeavingGame);
 
